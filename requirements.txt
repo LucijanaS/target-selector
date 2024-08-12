@@ -1,1 +1,11 @@
 streamlit
+altair
+pandas
+matplotlib
+scipy
+numpy
+csv
+tqdm
+datetime
+astropy
+itertools
