@@ -365,8 +365,6 @@ if button_check_visible:
 
 
     output_file = 'stars_visible_' + date_str + '.csv'
-    df = pd.read_csv(output_file)
-    st.write(df)
     # Write the extracted data to the CSV file
     with open(output_file, 'w', newline='') as csvfile:
         writer = csv.writer(csvfile)
@@ -382,6 +380,9 @@ if button_check_visible:
             # Get the data for each column and write it to the CSV file
             row_data = [extracted_data[key][i] for key in extracted_data.keys()]
             writer.writerow(row_data)
+        
+    df = pd.read_csv(output_file)
+    st.write(df)
 
 
 
