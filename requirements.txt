@@ -4,7 +4,6 @@ pandas
 matplotlib
 scipy
 numpy
-csv
 tqdm
 datetime
 astropy
