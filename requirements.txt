@@ -7,4 +7,5 @@ numpy
 tqdm
 datetime
 astropy
-itertools
+timezonefinder
+geopy
