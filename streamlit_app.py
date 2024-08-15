@@ -44,18 +44,49 @@ df_all_stars = pd.read_csv(csv_file)
 # ---------------------------------------------------------------------------------------------------------------------------------------
 # ---------------------------------------------------------------------------------------------------------------------------------------
 
+
+
+st.markdown(
+    """
+    ## Identifying SII Candidates by Location and Date
+    On this webpage, you can find stars that are ideal candidates for stellar intensity interferometry. \n
+
+    By entering your location and date, you can either view a list of available stars visible from that location or select a specific star 
+    from the dropdown menu to track its path across the sky and explore its visibility map."""
+    )
+
+st.markdown(
+    """
+    Similarly to the Target Stars WebApp (https://target-stars-sii.streamlit.app/), the stars used are from the Yale Bright Star Catalog which contains 9110 of the brightest stars (found at http://tdc-www.harvard.edu/catalogs/bsc5.html). 
+    The cataloge is in ASCII format and was converted to a .JSON format in the repository https://github.com/brettonw/YaleBrightStarCatalog. 
+    The data file used from that repository is bsc5-all.json. \n
+    From those 9000 stars, only the brightest 1500 were used for this WebApp of which a smaller set can be used to limit the runtime for the search.
+    """
+    )
+
+st.markdown(
+    """
+    ### Enter parameters
+    Before you proceed, it is best to enter all the parameters you have, like the coordinates of the location, the baseline, the time of observation and so on. \n
+    You can do so in the sidebar on the left. Note that everytime you change something in the sidebar, the plots and tables will reload f.
+    """
+    )
+
+
+# ---------------------------------------------------------------------------------------------------------------------------------------
+# ---------------------------------------------------------------------------------------------------------------------------------------
+
+
 st.sidebar.markdown("## Select Date and Location of Observation")
 
 
-c1, c2 = st.columns(2)
-with c1:
-    month = st.sidebar.selectbox(
-    "Month of observation:",
-    ("January", "February", "March", "April", "May", "June", 
-     "July", "August", "September", "October", "November", "December"), help="The date that will be checked is always the 15th of that particular month."
+
+month = st.sidebar.selectbox(
+"Month of observation:",
+("January", "February", "March", "April", "May", "June", 
+    "July", "August", "September", "October", "November", "December"), help="The date that will be checked is always the 15th of that particular month."
 )
-with c2:
-    year = st.sidebar.number_input("Enter Year of observation:", value=2024, step=1)
+year = st.sidebar.number_input("Enter Year of observation:", value=2024, step=1)
 
 
 month_number = {
@@ -73,139 +104,96 @@ month_number = {
     "December": "12"
 }[month]
 
-c1, c2, c3 = st.columns(3)
-with c1:
-    coordinates_form = st.sidebar.radio(
-        "Enter coordinates in: ",
-        ["degrees, minute, second (DMS)", "decimal degrees (DD)"])
-with c2:
-    two_telescopes = st.sidebar.radio(
-        label="Two telescopes?",
-        help="If you want to check the trace on the visibility map, you need to select two telescopes and enter at least the baseline. Otherwise you can still search for the stars visible from your location.",
-        options=["Yes", "No"]
+
+coordinates_form = st.sidebar.radio(
+    "Enter coordinates in: ",
+    ["degrees, minute, second (DMS)", "decimal degrees (DD)"])
+
+two_telescopes = st.sidebar.radio(
+    label="Two telescopes?",
+    help="If you want to check the trace on the visibility map, you need to select two telescopes and enter at least the baseline. Otherwise you can still search for the stars visible from your location.",
+    options=["Yes", "No"]
 )
-    if two_telescopes=="Yes":
-        with c3:
-            two_telescopes_location = st.sidebar.radio(
-                "Enter second telescope as baseline or coordinate",
-                ["baseline", "coordinates"])
+if two_telescopes=="Yes":
+    two_telescopes_location = st.sidebar.radio(
+        "Enter second telescope as baseline or coordinate",
+        ["baseline", "coordinates"])
 
 
 if coordinates_form == "degrees, minute, second (DMS)":
-    if two_telescopes=="No":
-        c1, c2, c3, c4 = st.columns(4)
-        with c1:
-            degree_lat1 = st.sidebar.number_input("Latitude degree:", format="%1f")
-        with c2:
-            min_lat1 = st.sidebar.number_input("Latitude minute:", format="%1f")
-        with c3:
-            sec_lat1 = st.sidebar.number_input("Latitude second:", format="%.1f")
-        with c4:
-            NS_lat1 = st.sidebar.selectbox("North or South:", ("N", "S"))
+    if two_telescopes == "No":
+
+        degree_lat1 = st.sidebar.number_input("Latitude degree:", format="%1f")
+        min_lat1 = st.sidebar.number_input("Latitude minute:", format="%1f")
+        sec_lat1 = st.sidebar.number_input("Latitude second:", format="%.1f")
+        NS_lat1 = st.sidebar.selectbox("North or South:", ("N", "S"))
+
+        degree_lon1 = st.sidebar.number_input("Longitude degree:", format="%1f")
+        min_lon1 = st.sidebar.number_input("Longitude minute:", format="%1f")
+        sec_lon1 = st.sidebar.number_input("Longitude second:", format="%.1f")
+        WE_lon1 = st.sidebar.selectbox("West or East:", ("W", "E"))
     
-        c1, c2, c3, c4 = st.columns(4)
-        with c1:
-            degree_lon1 = st.sidebar.number_input("Longitude degree:", format="%1f")
-        with c2:
-            min_lon1 = st.sidebar.number_input("Longitude minute:", format="%1f")
-        with c3:
-            sec_lon1 = st.sidebar.number_input("Longitude second:", format="%.1f")
-        with c4:
-            WE_lon1 = st.sidebar.selectbox("West or East:", ("W", "E"))
-    
-        lat_deg1=str(degree_lat1)+" "+str(min_lat1)+" "+str(sec_lat1)+NS_lat1
-        lon_deg1=str(degree_lon1)+" "+str(min_lon1)+" "+str(sec_lon1)+WE_lon1
+        lat_deg1 = str(degree_lat1) + " " + str(min_lat1) + " " + str(sec_lat1) + NS_lat1
+        lon_deg1 = str(degree_lon1) + " " + str(min_lon1) + " " + str(sec_lon1) + WE_lon1
 
         lat_dec1 = dms_to_decimal(lat_deg1)
         lon_dec1 = dms_to_decimal(lon_deg1)
 
     if two_telescopes == "Yes":
-        c1, c2, c3, c4 = st.columns(4)
-        with c1:
-            degree_lat1 = st.sidebar.number_input("Latitude degree of the first telescope:", format="%1f")
-        with c2:
-            min_lat1 = st.sidebar.number_input("Latitude minute of the first telescope:", format="%1f")
-        with c3:
-            sec_lat1 = st.sidebar.number_input("Latitude second of the first telescope:", format="%.1f")
-        with c4:
-            NS_lat1 = st.sidebar.selectbox("North or South:", ("N", "S"))
     
-        c1, c2, c3, c4 = st.columns(4)
-        with c1:
-            degree_lon1 = st.sidebar.number_input("Longitude degree of the first telescope:", format="%1f")
-        with c2:
-            min_lon1 = st.sidebar.number_input("Longitude minute of the first telescope:", format="%1f")
-        with c3:
-            sec_lon1 = st.sidebar.number_input("Longitude second of the first telescope:", format="%.1f")
-        with c4:
-            WE_lon1 = st.sidebar.selectbox("West or East:", ("W", "E"))
+        degree_lat1 = st.sidebar.number_input("Latitude degree of the first telescope:", format="%1f")
+        min_lat1 = st.sidebar.number_input("Latitude minute of the first telescope:", format="%1f")
+        sec_lat1 = st.sidebar.number_input("Latitude second of the first telescope:", format="%.1f")
+        NS_lat1 = st.sidebar.selectbox("North or South:", ("N", "S"))
 
+        degree_lon1 = st.sidebar.number_input("Longitude degree of the first telescope:", format="%1f")
+        min_lon1 = st.sidebar.number_input("Longitude minute of the first telescope:", format="%1f")
+        sec_lon1 = st.sidebar.number_input("Longitude second of the first telescope:", format="%.1f")
+        WE_lon1 = st.sidebar.selectbox("West or East:", ("W", "E"))
 
-
-        lat_deg1=str(degree_lat1)+" "+str(min_lat1)+" "+str(sec_lat1)+NS_lat1
-        lon_deg1=str(degree_lon1)+" "+str(min_lon1)+" "+str(sec_lon1)+WE_lon1
+        lat_deg1 = str(degree_lat1) + " " + str(min_lat1) + " " + str(sec_lat1) + NS_lat1
+        lon_deg1 = str(degree_lon1) + " " + str(min_lon1) + " " + str(sec_lon1) + WE_lon1
 
         lat_dec1 = dms_to_decimal(lat_deg1)
         lon_dec1 = dms_to_decimal(lon_deg1)
 
-        
-        
-        if two_telescopes_location=="coordinates":
-            c1, c2, c3, c4 = st.columns(4)
-            with c1:
-                degree_lat2 = st.sidebar.number_input("Latitude degree of second telescope:", format="%1f")
-            with c2:
-                min_lat2 = st.sidebar.number_input("Latitude minute of second telescope:", format="%1f")
-            with c3:
-                sec_lat2 = st.sidebar.number_input("Latitude second of second telescope:", format="%.1f")
-            with c4:
-                NS_lat2 = st.sidebar.selectbox("North or South: ", ("N", "S"))
-    
-            c1, c2, c3, c4 = st.columns(4)
-            with c1:
-                degree_lon2 = st.sidebar.number_input("Longitude degree of second telescope:", format="%1f")
-            with c2:
-                min_lon2 = st.sidebar.number_input("Longitude minute of second telescope:", format="%1f")
-            with c3:
-                sec_lon2 = st.sidebar.number_input("Longitude second of second telescope:", format="%.1f")
-            with c4:
-                WE_lon2 = st.sidebar.selectbox("West or East ", ("W", "E"))
-    
-                lat_deg2=str(degree_lat2)+" "+str(min_lat2)+" "+str(sec_lat2)+NS_lat2
-                lon_deg2=str(degree_lon2)+" "+str(min_lon2)+" "+str(sec_lon2)+WE_lon2
+        if two_telescopes_location == "coordinates":
 
-                lat_dec2 = dms_to_decimal(lat_deg2)
-                lon_dec2 = dms_to_decimal(lon_deg2)
-        else:
-            baseline=st.sidebar.number_input("Enter the baseline used in meters:", format="%1f", help="The baseline vector should not include the difference in height, this is really the difference in N-S and W-E.")
+            degree_lat2 = st.sidebar.number_input("Latitude degree of second telescope:", format="%1f")
+            min_lat2 = st.sidebar.number_input("Latitude minute of second telescope:", format="%1f")
+            sec_lat2 = st.sidebar.number_input("Latitude second of second telescope:", format="%.1f")
+            NS_lat2 = st.sidebar.selectbox("North or South: ", ("N", "S"))
 
+            degree_lon2 = st.sidebar.number_input("Longitude degree of second telescope:", format="%1f")
+            min_lon2 = st.sidebar.number_input("Longitude minute of second telescope:", format="%1f")
+            sec_lon2 = st.sidebar.number_input("Longitude second of second telescope:", format="%.1f")
+            WE_lon2 = st.sidebar.selectbox("West or East ", ("W", "E"))
 
+            lat_deg2 = str(degree_lat2) + " " + str(min_lat2) + " " + str(sec_lat2) + NS_lat2
+            lon_deg2 = str(degree_lon2) + " " + str(min_lon2) + " " + str(sec_lon2) + WE_lon2
 
+            lat_dec2 = dms_to_decimal(lat_deg2)
+            lon_dec2 = dms_to_decimal(lon_deg2)
+
+if two_telescopes_location == "baseline":
+    baseline = st.sidebar.number_input("Enter the baseline used in meters:", format="%1f", help="The baseline vector should not include the difference in height, this is really the difference in N-S and W-E.")
 
 if coordinates_form=="decimal degrees (DD)":
     if two_telescopes == "No":
-        c1, c2, c3, c4 = st.columns(4)
-        with c1:
-            lat_dec1 = st.sidebar.number_input("Latitude degree:", format="%.5f")
-        with c2:
-            lon_dec1 = st.sidebar.number_input("Latitude minute:", format="%.5f")
+
+        lat_dec1 = st.sidebar.number_input("Latitude degree:", format="%.5f")
+        lon_dec1 = st.sidebar.number_input("Latitude minute:", format="%.5f")
 
     if two_telescopes == "Yes":
-        c1, c2 = st.columns(2)
-        with c1:
-            lat_dec1 = st.sidebar.number_input("Latitude degree for the first telescope:", format="%.5f")
-        with c2:
-            lon_dec1 = st.sidebar.number_input("Latitude minute for the first telescope:", format="%.5f")
+        
+        lat_dec1 = st.sidebar.number_input("Latitude degree for the first telescope:", format="%.5f")
+        lon_dec1 = st.sidebar.number_input("Latitude minute for the first telescope:", format="%.5f")
         
         if two_telescopes_location=="coordinates":
         
-            c1, c2 = st.columns(2)
-            with c1:
-                lat_dec2 = st.sidebar.number_input("Latitude degree for the second telescope:", format="%.5f")
-            with c2:
-                lon_dec2 = st.sidebar.number_input("Latitude minute for the second telescope:", format="%.5f")
-        else:
-            baseline=st.number_input("Enter the baseline used in meters:", format="%1f")
+            lat_dec2 = st.sidebar.number_input("Latitude degree for the second telescope:", format="%.5f")
+            lon_dec2 = st.sidebar.number_input("Latitude minute for the second telescope:", format="%.5f")
+
 
 
 utc_offset=st.sidebar.number_input("Enter UTC offset for correct estimate of visibility during the night:", min_value=-12, max_value=+12, step=1, value=0)
@@ -221,6 +209,7 @@ map = st.sidebar.checkbox("Show map of locations of telescopes", help="This has 
 
 
 if map:
+    st.write("Here you see a map with the locations you gave coordinates to.")
     # Create DataFrame from data
     df = pd.DataFrame(data)
 
@@ -248,7 +237,7 @@ number_of_stars = st.sidebar.number_input("Number of brightest stars to check:",
                                           "many of the brightest stars you want to check for a particular night. A recommended choice would be 50-100, this takes up to 30s to calculate.")
 
 if two_telescopes=="Yes":
-    heights = st.sidebar.checkbox("Enter heights above sea level", help="This is mainly relevant if difference in height is of similar order as the baseline, then the UV-trace might turn out to be different.")
+    heights = st.sidebar.checkbox("Enter heights above sea level", help="This is mainly relevant if the difference in height between telescopes is of similar or larger order than the baseline. In that case the UV-trace might turn out to be different.")
 
     if heights:
         height1=st.sidebar.number_input("Height of first telescope above sea level in meters:", format="%1f")
@@ -281,30 +270,6 @@ if two_telescopes=="Yes":
         # Difference in height (x_up)
         delta_height = height2 - height1
         x_up = delta_height
-
-# ---------------------------------------------------------------------------------------------------------------------------------------
-# ---------------------------------------------------------------------------------------------------------------------------------------
-
-
-st.markdown(
-    """
-    ## Identifying SII Candidates by Location and Date
-    On this webpage, you can find stars that are ideal candidates for stellar intensity interferometry. \n
-
-    By entering your location and date, you can either view a list of available stars visible from that location or select a specific star 
-    from the dropdown menu to track its path across the sky and explore its visibility map."""
-    )
-
-st.markdown(
-    """
-    Similarly to the Target Stars WebApp (https://target-stars-sii.streamlit.app/), the stars used are from the Yale Bright Star Catalog which contains 9110 of the brightest stars (found at http://tdc-www.harvard.edu/catalogs/bsc5.html). 
-    The cataloge is in ASCII format and was converted to a .JSON format in the repository https://github.com/brettonw/YaleBrightStarCatalog. 
-    The data file used from that repository is bsc5-all.json. \n
-    From those 9000 stars, only the brightest 1500 were used for this WebApp of which a smaller set can be used to limit the runtime for the search.
-    """
-    )
-
-
 
 # ---------------------------------------------------------------------------------------------------------------------------------------
 # ---------------------------------------------------------------------------------------------------------------------------------------
@@ -365,78 +330,76 @@ with st.form("key1"):
     st.write("Click here to search for stars visible at night in the month of ", month, ".")
     button_check_visible = st.form_submit_button("Search")
 
-if button_check_visible:
-    # Iterate over each equatorial coordinate
-    for equatorial_coord in tqdm(equatorial_coords[:number_of_stars]):
-        # Initialize lists to store altitude and azimuth values for the current star
-        altitudes = []
-        azimuths = []
+    if button_check_visible:
+        # Iterate over each equatorial coordinate
+        for equatorial_coord in tqdm(equatorial_coords[:number_of_stars]):
+            # Initialize lists to store altitude and azimuth values for the current star
+            altitudes = []
+            azimuths = []
 
-        # Define the time span
-        hours_before = 0
-        hours_after = 12
-        start_time = observation_time_utc - TimeDelta(hours_before * u.hour)
-        end_time = observation_time_utc + TimeDelta(hours_after * u.hour)
+            # Define the time span
+            hours_before = 0
+            hours_after = 12
+            start_time = observation_time_utc - TimeDelta(hours_before * u.hour)
+            end_time = observation_time_utc + TimeDelta(hours_after * u.hour)
 
-        # Calculate altitude and azimuth for each time point
-        times = start_time + (end_time - start_time) * np.linspace(0, 1, 97)[:, None]
-        for time in times:
-            altaz_coords = equatorial_coord.transform_to(
-                AltAz(obstime=time, location=EarthLocation(lat=lat_dec1, lon=lon_dec1, height=height1)))
-            altitude = altaz_coords.alt
-            azimuth = altaz_coords.az
-            altitudes.append(altitude)
-            azimuths.append(azimuth)
+            # Calculate altitude and azimuth for each time point
+            times = start_time + (end_time - start_time) * np.linspace(0, 1, 97)[:, None]
+            for time in times:
+                altaz_coords = equatorial_coord.transform_to(
+                    AltAz(obstime=time, location=EarthLocation(lat=lat_dec1, lon=lon_dec1, height=height1)))
+                altitude = altaz_coords.alt
+                azimuth = altaz_coords.az
+                altitudes.append(altitude)
+                azimuths.append(azimuth)
 
-        # Append altitude and azimuth lists for the current star to the main lists
-        altitudes_per_star.append(altitudes)
-        azimuths_per_star.append(azimuths)
+            # Append altitude and azimuth lists for the current star to the main lists
+            altitudes_per_star.append(altitudes)
+            azimuths_per_star.append(azimuths)
 
-    # Define a threshold for altitude entries
-    altitude_threshold = 10  # Minimum altitude value during one night
+        # Define a threshold for altitude entries
+        altitude_threshold = 10  # Minimum altitude value during one night
 
-    # Iterate over each star's altitude data
-    extracted_data = {}
-    for key in data.keys():
-        extracted_data[key] = []
+        # Iterate over each star's altitude data
+        extracted_data = {}
+        for key in data.keys():
+            extracted_data[key] = []
 
-    progress_text = "Operation in progress. Please wait."
-    my_bar = st.progress(0, text=progress_text)
+        for star_idx, altitudes in tqdm(enumerate(altitudes_per_star)):
+            
+            # Count the number of altitude entries less than the threshold
+            low_altitude_count = sum(altitude.value < altitude_threshold for altitude in altitudes)
 
-    for star_idx, altitudes in tqdm(enumerate(altitudes_per_star)):
+            # Check if more than 1/4 of the entries have altitudes less than the threshold
+            if low_altitude_count < len(altitudes) / 4:
+                # Remove corresponding entries from the data dictionary for the star
+                for key in data.keys():
+                    extracted_data[key].append(data[key][star_idx])
         
-        my_bar.progress(star_idx + 1, text=progress_text)
-        # Count the number of altitude entries less than the threshold
-        low_altitude_count = sum(altitude.value < altitude_threshold for altitude in altitudes)
-
-        # Check if more than 1/4 of the entries have altitudes less than the threshold
-        if low_altitude_count < len(altitudes) / 4:
-            # Remove corresponding entries from the data dictionary for the star
-            for key in data.keys():
-                extracted_data[key].append(data[key][star_idx])
-    my_bar.empty()
 
 
 
-    output_file = 'stars_visible_' + date_str + '.csv'
-    # Write the extracted data to the CSV file
-    with open(output_file, 'w', newline='') as csvfile:
-        writer = csv.writer(csvfile)
 
-        # Write the header row using the keys of the extracted_data dictionary
-        writer.writerow(extracted_data.keys())
+        output_file = 'stars_visible_' + date_str + '.csv'
+        # Write the extracted data to the CSV file
+        with open(output_file, 'w', newline='') as csvfile:
+            writer = csv.writer(csvfile)
 
-        # Write the data rows
-        # Determine the number of rows based on the length of one of the lists in extracted_data
-        num_rows = len(next(iter(extracted_data.values())))
+            # Write the header row using the keys of the extracted_data dictionary
+            writer.writerow(extracted_data.keys())
 
-        for i in range(num_rows):
-            # Get the data for each column and write it to the CSV file
-            row_data = [extracted_data[key][i] for key in extracted_data.keys()]
-            writer.writerow(row_data)
-        
-    df = pd.read_csv(output_file)
-    st.write(df)
+            # Write the data rows
+            # Determine the number of rows based on the length of one of the lists in extracted_data
+            num_rows = len(next(iter(extracted_data.values())))
+
+            for i in range(num_rows):
+                # Get the data for each column and write it to the CSV file
+                row_data = [extracted_data[key][i] for key in extracted_data.keys()]
+                writer.writerow(row_data)
+            
+        df = pd.read_csv(output_file)
+        st.write("The stars that are visible in "+ month+ " at your location are listed below. You can download the list as a .csv file.")
+        st.write(df)
 
 
 
@@ -533,7 +496,7 @@ with st.form("key2"):
         
         # Create a grid of points
         resolution = 300
-        size_to_plot = np.sqrt(x_E**2 + x_N**2)
+        size_to_plot = np.sqrt(x_E**2 + x_N**2 + x_up**2)
         x = np.linspace(-size_to_plot, size_to_plot, resolution)
         y = np.linspace(-size_to_plot, size_to_plot, resolution)
         X, Y = np.meshgrid(x, y)
