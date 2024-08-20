@@ -263,13 +263,9 @@ if two_telescopes=="Yes":
         x_N = np.round((delta_lat * R * np.pi / 180.0).value*1000, 3)
         x_up = delta_height
 
-    if two_telescopes_location=="baseline":
-        x_E=baseline
-        x_N=0
-
-        # Difference in height (x_up)
-        delta_height = height2 - height1
-        x_up = delta_height
+    # Difference in height (x_up)
+    delta_height = height2 - height1
+    x_up = delta_height
 
 # ---------------------------------------------------------------------------------------------------------------------------------------
 # ---------------------------------------------------------------------------------------------------------------------------------------
@@ -419,8 +415,16 @@ with st.form("key2"):
     button_check_select = st.form_submit_button("Select")
     
     if button_check_select:
-        if baseline==0 or x_E==0:
-            st.write("If you do not see the visibility map of your star or a UV trace plot, you should enter either a baseline or a second set of coordinates for the telescope.")
+        if baseline==0:
+            st.write("Please enter a baseline that is non-zero to see the trace on the visibility map.")
+
+        if two_telescopes_location=="baseline":
+            st.write("Indicate the orientation angle of the baseline.")
+            angle = st.number_input("Angle of orientation in degrees:", min_value=0, max_value=359, value=90, help="i.e. 0° corresponds to $x_N$=baseline, $x_E$=0; 90° corresponds to $x_N$=0, $x_E$=baseline and so on.")
+
+            x_E = np.sin(2*np.pi*angle/360)*baseline
+            x_N = np.cos(2*np.pi*angle/360)*baseline
+
         selected_star = st.selectbox('Select a star:', options=df_all_stars['Identifier'], help="The stars are sorted by brightness i.e. the apparent magnitude")
         star_details = df_all_stars[df_all_stars['Identifier'] == selected_star].iloc[0]
         
@@ -436,6 +440,10 @@ with st.form("key2"):
         
         lat = lat_dec1
         lon = lon_dec1
+
+
+        if baseline==0:
+            st.write("Please enter a baseline that is non-zero to see the trace on the visibility map.")
         
         # Parse the input string into a datetime object
         date_obj = datetime.strptime(date_str, '%Y-%m-%d')
@@ -494,6 +502,8 @@ with st.form("key2"):
         V = []
         W = []
         
+        
+
         # Create a grid of points
         resolution = 300
         size_to_plot = np.sqrt(x_E**2 + x_N**2 + x_up**2)
@@ -501,6 +511,11 @@ with st.form("key2"):
         y = np.linspace(-size_to_plot, size_to_plot, resolution)
         X, Y = np.meshgrid(x, y)
         R = np.sqrt(X ** 2 + Y ** 2)
+
+
+        # Difference in height (x_up)
+        delta_height = height2 - height1
+        x_up = delta_height
         
         for time in times:
             HA_value = RA_2_HA(given_ra_decimal, time.jd)
@@ -516,6 +531,21 @@ with st.form("key2"):
         
         # Plot the UVW plane in the second column
         fig2, ax2 = plt.subplots()
+        if baseline==0:
+            plt.text(0.8, 0.6, "Please enter a non-zero baseline", size=10, rotation=0.,
+            ha="right", va="top",
+            bbox=dict(boxstyle="square",
+                   ec=(1., 0.5, 0.5),
+                   fc=(1., 0.8, 0.8),
+                   )
+            )
+            ax2.set_title("Visibility Map of "+ BayerF + ", diameter: " + str(diameter_V) + " mas\n "
+                          "$\Phi$ = " + str(np.round(Phi_V, 7)) + " photons m$^{-2}$ s$^{-1}$ Hz$^{-1}$")
+            ax2.set_xlabel('U [m]')
+            ax2.set_ylabel('V [m]')
+            ax2.set_aspect('equal')
+            col2.pyplot(fig2)
+
         cax = ax2.imshow(intensity_values, norm=None, extent=(-size_to_plot, size_to_plot, -size_to_plot, size_to_plot), origin='lower', cmap='gray')
         ax2.plot(U, V, '.', color='gold', markeredgecolor='black')
         ax2.set_title("Visibility Map of "+ BayerF + ", diameter: " + str(diameter_V) + " mas\n "
