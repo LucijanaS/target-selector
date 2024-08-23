@@ -22,6 +22,7 @@ import numpy as np
 from scipy.constants import c, h, k, pi
 from scipy.special import j0, j1
 import scipy.signal as signal
+import math
 
 import matplotlib.pyplot as plt
 
@@ -211,3 +212,54 @@ def visibility(b, theta, lambda_):
     input = np.pi * b * theta / lambda_
     I = (2 * j1(input) / input) ** 2
     return I
+
+def apparent_radius_mas(radius_solar_radii, distance_pc):
+    """
+    Calculates the apparent radius of a star in milliarcseconds.
+
+    Args:
+        radius_solar_radii: Radius of the star in solar radii.
+        distance_pc: Distance to the star in parsecs.
+
+    Returns:
+        Apparent radius of the star in milliarcseconds.
+    """
+
+    # Astronomical constants
+    solar_radius_meters = 6.957e8  # meters
+    arcseconds_per_radian = 206265  # arcseconds/radian
+
+    # Calculate the star's radius in meters
+    radius_meters = radius_solar_radii * solar_radius_meters
+
+    # Calculate the apparent radius in radians
+    apparent_radius_radians = math.atan(radius_meters / (distance_pc * 3.086e16))  # Convert pc to meters
+
+    # Convert radians to milliarcseconds
+    apparent_radius_mas = apparent_radius_radians * arcseconds_per_radian * 1000
+
+    return apparent_radius_mas
+
+
+def RA_2_HA_single(right_ascension, local_time):
+    """Converts right ascension (in decimal degrees) to hour angle (in decimal degrees) given the observation time (Julian date)."""
+    # Calculate Greenwich Mean Sidereal Time (GMST) at 0h UTC on the given observation date
+    gmst_0h_J2000 = 280.4606
+
+    # Calculate the number of Julian centuries since J2000 epoch
+    T = (local_time - 2451545.0) / 36525.0
+
+    # Calculate the GMST at the given observation time
+    gmst = gmst_0h_J2000 + 360.98564724 * (local_time - 2451545.0) + 0.000387933 * T ** 2 - (T ** 3) / 38710000.0
+
+    # Normalize GMST to the range [0, 360) degrees
+    gmst %= 360.0
+
+    # Calculate the hour angle (HA) in decimal degrees
+    ha = gmst - right_ascension
+
+    # Normalize hour angle to the range [-180, 180) degrees
+    ha = (ha + 180.0) % 360.0 - 180.0
+
+    # Return the hour angle as a float
+    return ha

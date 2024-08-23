@@ -9,3 +9,5 @@ datetime
 astropy
 timezonefinder
 geopy
+plotly
+math

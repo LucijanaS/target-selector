@@ -3,6 +3,16 @@ import csv
 from brightstar_functions import *
 import streamlit as st
 import pandas as pd
+from orbit import Orbit
+from correl import visib
+from fourier import grids
+from graphics import draw
+import plotly.express as px
+from plotly.subplots import make_subplots
+import datetime
+
+
+
 
 # - * - coding: utf - 8 - * -
 
@@ -37,7 +47,16 @@ with open(csv_file, 'w') as csvfile:
     writer.writeheader()
     writer.writerows(data)
 
+
+
 df_all_stars = pd.read_csv(csv_file)
+
+# Exclude the last 6 columns
+df_display = df_all_stars.iloc[:, :-6]
+
+# Display the DataFrame in Streamlit
+st.write(df_display)
+
 
 
 
@@ -81,28 +100,7 @@ st.sidebar.markdown("## Select Date and Location of Observation")
 
 
 
-month = st.sidebar.selectbox(
-"Month of observation:",
-("January", "February", "March", "April", "May", "June", 
-    "July", "August", "September", "October", "November", "December"), help="The date that will be checked is always the 15th of that particular month."
-)
-year = st.sidebar.number_input("Enter Year of observation:", value=2024, step=1)
-
-
-month_number = {
-    "January": "01",
-    "February": "02",
-    "March": "03",
-    "April": "04",
-    "May": "05",
-    "June": "06",
-    "July": "07",
-    "August": "08",
-    "September": "09",
-    "October": "10",
-    "November": "11",
-    "December": "12"
-}[month]
+date = st.sidebar.date_input("Enter date of observation", datetime.date.today())
 
 
 coordinates_form = st.sidebar.radio(
@@ -123,14 +121,14 @@ if two_telescopes=="Yes":
 if coordinates_form == "degrees, minute, second (DMS)":
     if two_telescopes == "No":
 
-        degree_lat1 = st.sidebar.number_input("Latitude degree:", format="%1f")
-        min_lat1 = st.sidebar.number_input("Latitude minute:", format="%1f")
-        sec_lat1 = st.sidebar.number_input("Latitude second:", format="%.1f")
+        degree_lat1 = st.sidebar.number_input("Latitude degree:", format="%1f", value=23.)
+        min_lat1 = st.sidebar.number_input("Latitude minute:", format="%1f", value=20.)
+        sec_lat1 = st.sidebar.number_input("Latitude second:", format="%.1f", value=31.9)
         NS_lat1 = st.sidebar.selectbox("North or South:", ("N", "S"))
 
-        degree_lon1 = st.sidebar.number_input("Longitude degree:", format="%1f")
-        min_lon1 = st.sidebar.number_input("Longitude minute:", format="%1f")
-        sec_lon1 = st.sidebar.number_input("Longitude second:", format="%.1f")
+        degree_lon1 = st.sidebar.number_input("Longitude degree:", format="%1f", value=16.)
+        min_lon1 = st.sidebar.number_input("Longitude minute:", format="%1f", value=13.)
+        sec_lon1 = st.sidebar.number_input("Longitude second:", format="%.1f", value=29.7)
         WE_lon1 = st.sidebar.selectbox("West or East:", ("W", "E"))
     
         lat_deg1 = str(degree_lat1) + " " + str(min_lat1) + " " + str(sec_lat1) + NS_lat1
@@ -141,15 +139,15 @@ if coordinates_form == "degrees, minute, second (DMS)":
 
     if two_telescopes == "Yes":
     
-        degree_lat1 = st.sidebar.number_input("Latitude degree of the first telescope:", format="%1f")
-        min_lat1 = st.sidebar.number_input("Latitude minute of the first telescope:", format="%1f")
-        sec_lat1 = st.sidebar.number_input("Latitude second of the first telescope:", format="%.1f")
-        NS_lat1 = st.sidebar.selectbox("North or South:", ("N", "S"))
+        degree_lat1 = st.sidebar.number_input("Latitude degree of the first telescope:", format="%1f", value=23.)
+        min_lat1 = st.sidebar.number_input("Latitude minute of the first telescope:", format="%1f", value=20.)
+        sec_lat1 = st.sidebar.number_input("Latitude second of the first telescope:", format="%.1f", value=31.9)
+        NS_lat1 = st.sidebar.selectbox("North or South:", ("N", "S"), index=1)
 
-        degree_lon1 = st.sidebar.number_input("Longitude degree of the first telescope:", format="%1f")
-        min_lon1 = st.sidebar.number_input("Longitude minute of the first telescope:", format="%1f")
-        sec_lon1 = st.sidebar.number_input("Longitude second of the first telescope:", format="%.1f")
-        WE_lon1 = st.sidebar.selectbox("West or East:", ("W", "E"))
+        degree_lon1 = st.sidebar.number_input("Longitude degree of the first telescope:", format="%1f", value=16.)
+        min_lon1 = st.sidebar.number_input("Longitude minute of the first telescope:", format="%1f", value=13.)
+        sec_lon1 = st.sidebar.number_input("Longitude second of the first telescope:", format="%.1f", value=29.7)
+        WE_lon1 = st.sidebar.selectbox("West or East:", ("W", "E"), index=1)
 
         lat_deg1 = str(degree_lat1) + " " + str(min_lat1) + " " + str(sec_lat1) + NS_lat1
         lon_deg1 = str(degree_lon1) + " " + str(min_lon1) + " " + str(sec_lon1) + WE_lon1
@@ -159,15 +157,15 @@ if coordinates_form == "degrees, minute, second (DMS)":
 
         if two_telescopes_location == "coordinates":
 
-            degree_lat2 = st.sidebar.number_input("Latitude degree of second telescope:", format="%1f")
-            min_lat2 = st.sidebar.number_input("Latitude minute of second telescope:", format="%1f")
-            sec_lat2 = st.sidebar.number_input("Latitude second of second telescope:", format="%.1f")
-            NS_lat2 = st.sidebar.selectbox("North or South: ", ("N", "S"))
+            degree_lat2 = st.sidebar.number_input("Latitude degree of second telescope:", format="%1f", value=23.)
+            min_lat2 = st.sidebar.number_input("Latitude minute of second telescope:", format="%1f", value=20.)
+            sec_lat2 = st.sidebar.number_input("Latitude second of second telescope:", format="%.1f", value=29.7)
+            NS_lat2 = st.sidebar.selectbox("North or South: ", ("N", "S"), index=1)
 
-            degree_lon2 = st.sidebar.number_input("Longitude degree of second telescope:", format="%1f")
-            min_lon2 = st.sidebar.number_input("Longitude minute of second telescope:", format="%1f")
-            sec_lon2 = st.sidebar.number_input("Longitude second of second telescope:", format="%.1f")
-            WE_lon2 = st.sidebar.selectbox("West or East ", ("W", "E"))
+            degree_lon2 = st.sidebar.number_input("Longitude degree of second telescope:", format="%1f", value=16.)
+            min_lon2 = st.sidebar.number_input("Longitude minute of second telescope:", format="%1f", value=13.)
+            sec_lon2 = st.sidebar.number_input("Longitude second of second telescope:", format="%.1f", value=28.1)
+            WE_lon2 = st.sidebar.selectbox("West or East ", ("W", "E"), index=1)
 
             lat_deg2 = str(degree_lat2) + " " + str(min_lat2) + " " + str(sec_lat2) + NS_lat2
             lon_deg2 = str(degree_lon2) + " " + str(min_lon2) + " " + str(sec_lon2) + WE_lon2
@@ -175,28 +173,29 @@ if coordinates_form == "degrees, minute, second (DMS)":
             lat_dec2 = dms_to_decimal(lat_deg2)
             lon_dec2 = dms_to_decimal(lon_deg2)
 
-if two_telescopes_location == "baseline":
-    baseline = st.sidebar.number_input("Enter the baseline used in meters:", format="%1f", help="The baseline vector should not include the difference in height, this is really the difference in N-S and W-E.")
+if two_telescopes=="Yes":
+    if two_telescopes_location == "baseline":
+        baseline = st.sidebar.number_input("Enter the baseline used in meters:", format="%1f", help="The baseline vector should not include the difference in height, this is really the difference in N-S and W-E.")
 
 if coordinates_form=="decimal degrees (DD)":
     if two_telescopes == "No":
 
-        lat_dec1 = st.sidebar.number_input("Latitude degree:", format="%.5f")
-        lon_dec1 = st.sidebar.number_input("Latitude minute:", format="%.5f")
+        lat_dec1 = st.sidebar.number_input("Latitude degree:", format="%.5f", value=-23.3422040)
+        lon_dec1 = st.sidebar.number_input("Latitude minute:", format="%.5f", value=16.2249443)
 
     if two_telescopes == "Yes":
         
-        lat_dec1 = st.sidebar.number_input("Latitude degree for the first telescope:", format="%.5f")
-        lon_dec1 = st.sidebar.number_input("Latitude minute for the first telescope:", format="%.5f")
+        lat_dec1 = st.sidebar.number_input("Latitude degree for the first telescope:", format="%.5f", value=-23.3422040)
+        lon_dec1 = st.sidebar.number_input("Latitude minute for the first telescope:", format="%.5f", value=16.2249443)
         
         if two_telescopes_location=="coordinates":
         
-            lat_dec2 = st.sidebar.number_input("Latitude degree for the second telescope:", format="%.5f")
-            lon_dec2 = st.sidebar.number_input("Latitude minute for the second telescope:", format="%.5f")
+            lat_dec2 = st.sidebar.number_input("Latitude degree for the second telescope:", format="%.5f", value=-23.3415711)
+            lon_dec2 = st.sidebar.number_input("Latitude minute for the second telescope:", format="%.5f", value=16.2244744)
 
 
 
-utc_offset=st.sidebar.number_input("Enter UTC offset for correct estimate of visibility during the night:", min_value=-12, max_value=+12, step=1, value=0)
+utc_offset=st.sidebar.number_input("Enter UTC offset for correct estimate of visibility during the night:", min_value=-12, max_value=+12, step=1, value=+2)
 
 
 # Define your conditions for data
@@ -231,7 +230,7 @@ if map:
         df = pd.concat([df, df_circle], ignore_index=True)
 
     # Display the map with the points
-    st.map(df, size=1)
+    st.map(df, size=1, zoom=15)
 
 number_of_stars = st.sidebar.number_input("Number of brightest stars to check:", min_value=10, max_value=1600, help="Going through all of the 1500 stars can take up to 5 minutes, so here you can specify how" 
                                           "many of the brightest stars you want to check for a particular night. A recommended choice would be 50-100, this takes up to 30s to calculate.")
@@ -275,7 +274,7 @@ if two_telescopes=="Yes":
 data = {}
 
 # Open the CSV file
-with open('10000stars_data.csv', newline='') as csvfile:
+with open(csv_file, newline='') as csvfile:
     reader = csv.reader(csvfile)
     header = next(reader)  # Read the header row
 
@@ -290,14 +289,20 @@ with open('10000stars_data.csv', newline='') as csvfile:
             column_name = header[idx]  # Get the corresponding column name
             data[column_name].append(item)
 
-date_str=str(year)+"-"+str(month_number)+"-"+"15"
 
-# Parse the input string into a datetime object
-date_obj = datetime.strptime(date_str, '%Y-%m-%d')
+st.write("In the following table you see a list of stars that the app will run through to check which of those are visible. Right now you "
+         "have selected to filter the brightest "+str(number_of_stars)+" stars to go through.")
+
+df = pd.read_csv(csv_file)
+st.write(df_display.head(number_of_stars))
+date_obj = datetime.datetime.combine(date, datetime.time(12, 0))
+date_str =str(date_obj)
+
 
 # Convert the date object to a Julian date
 date_JD = date_obj.toordinal() + 1721425 + .33333 - (
         1 / 24) * utc_offset  # added 1/3 since observations will most likely start at 8pm + offset of timezone
+
 
 # Create a Time object from the observation time in Julian date
 observation_time_utc = Time(date_JD, format='jd')
@@ -320,10 +325,10 @@ for i in range(len(data["RA_decimal"])):
 # Initialize lists to store altitude and azimuth values for each star
 altitudes_per_star = []
 azimuths_per_star = []
-
+plt.style.use('default')
 with st.form("key1"):
     # ask for input
-    st.write("Click here to search for stars visible at night in the month of ", month, ".")
+    st.write("Click here to search for stars visible in the night of the ", str(date), ".")
     button_check_visible = st.form_submit_button("Search")
 
     if button_check_visible:
@@ -394,7 +399,7 @@ with st.form("key1"):
                 writer.writerow(row_data)
             
         df = pd.read_csv(output_file)
-        st.write("The stars that are visible in "+ month+ " at your location are listed below. You can download the list as a .csv file.")
+        st.write("The stars that are visible in the night of "+str(date)+ " at your location are listed below. You can download the list as a .csv file.")
         st.write(df)
 
 
@@ -410,100 +415,280 @@ df_all_stars['Identifier'] = df_all_stars.apply(
 
 # Create a selectbox for selecting a star
 
-with st.form("key2"):
+if two_telescopes=="Yes":
     st.write("Alternatively if you already have a star in mind, click here to select a star out of a drop-down menu and draw the visibility map and its trace along the sky.")
-    button_check_select = st.form_submit_button("Select")
-    
-    if button_check_select:
+
+    if two_telescopes_location=="baseline":
         if baseline==0:
             st.write("Please enter a baseline that is non-zero to see the trace on the visibility map.")
+
+        st.write("Indicate the orientation angle of the baseline.")
+        angle = st.number_input("Angle of orientation in degrees:", min_value=0, max_value=359, value=90, help="i.e. 0° corresponds to $x_N$=baseline, $x_E$=0; 90° corresponds to $x_N$=0, $x_E$=baseline and so on.")
+
+        x_E = np.sin(2*np.pi*angle/360)*baseline
+        x_N = np.cos(2*np.pi*angle/360)*baseline
+
+    selected_star = st.selectbox('Select a star:', options=df_all_stars['Identifier'], help="The stars are sorted by brightness i.e. the apparent magnitude")
+    star_details = df_all_stars[df_all_stars['Identifier'] == selected_star].iloc[0]
+
+
+    star_of_interest = f"{star_details['BayerF']},{star_details['Common']},{star_details['Parallax']},{star_details['Distance']},{star_details['Umag']},{star_details['Vmag']},{star_details['Bmag']},{star_details['Temp']},{star_details['RA_decimal']},{star_details['Dec_decimal']},{star_details['RA']},{star_details['Dec']},{star_details['Diameter_U']},{star_details['Diameter_V']},{star_details['Diameter_B']},{star_details['Phi_U']},{star_details['Phi_V']},{star_details['Phi_B']}"
+
+
+    values = star_of_interest.split(',')
+    BayerF = values[0]
+    given_ra_decimal = float(values[8])
+    given_dec_decimal = float(values[9])
+    diameter_V = float(values[13])
+    Phi_V = float(values[16])
+    diameter_in_rad = diameter_V / 1000 * np.pi / (3600 * 180)
+
+    lat = lat_dec1
+    lon = lon_dec1
+
+
+    # Convert the date object to a Julian date
+    date_JD = date_obj.toordinal() + 1721425 + .33333 - (1 / 24) * utc_offset
+
+    # Create a Time object from the observation time in Julian date
+    observation_time_utc = Time(date_JD, format='jd')
+
+    equatorial_coords = SkyCoord(given_ra_decimal, given_dec_decimal, unit=(u.hourangle, u.deg), frame='icrs')
+
+    # Define time range for trail calculation
+    hours_before = -1 / 3600
+    hours_after = 12.001
+
+    start_time = observation_time_utc - TimeDelta(hours_before * u.hour)
+    end_time = observation_time_utc + TimeDelta(hours_after * u.hour)
+    times = start_time + (end_time - start_time) * np.linspace(0, 1, 97)[:, None]
+
+    # Calculate coordinates at each time step
+    altitudes = []
+    azimuths = []
+
+    for time in times:
+        altaz_coords = equatorial_coords.transform_to(
+            AltAz(obstime=time, location=EarthLocation(lat=lat, lon=lon, height=height1)))
+        altitudes.append(altaz_coords.alt)
+        azimuths.append(altaz_coords.az)
+
+    # Convert lists to arrays
+    altitudes = np.array(altitudes)
+    azimuths = np.array(azimuths)
+    azimuths_flat = azimuths.flatten()
+    datetime_objects = [Time(time[0]).to_datetime() for time in times]
+
+    # Extract only the time component from datetime objects and convert to string
+    time_components = [dt.time().strftime('%H:%M') for dt in datetime_objects]
+
+    # Create columns for the plots
+    col1, col2 = st.columns(2)
+
+    # Plot the trail in the first column
+    fig1, ax1 = plt.subplots(figsize=(8, 6))
+    sc = ax1.scatter(time_components, altitudes, c=azimuths_flat)
+    plt.colorbar(sc, label='Azimuth [°]', ax=ax1)  # Add color bar indicating azimuth
+    ax1.set_xticks(time_components[::12])
+    ax1.set_title("Celestial Path of "+ BayerF)
+    ax1.set_xlabel('UTC Time')
+    ax1.set_ylabel('Altitude [°]')
+    ax1.set_ylim(0, 90)
+    ax1.grid(True)
+    col1.pyplot(fig1)
+
+    if selected_star=="ι Orionis (Nair Al Saif)" or selected_star=="α Virginis (Spica)":
+        st.write("You have selected a binary star, which means that the visibility map is going to vary as a function of time.")
+        st.write("To see how the visibility map changes, you have now a slider to select the frame.")
+
+        fig2, ax2 = plt.subplots(figsize=(8, 6))
+        spica = Orbit(P=4.01, e=0.123, I=63,
+            Omega=309.938, omega=2136.727, jdperi=2440678.008, q=0.6188)             
+        
+        if selected_star=="ι Orionis (Nair Al Saif)":
+            R_in_sol1 = 8.3
+            R_in_sol2 = 5.4
+            distance_in_pc= 412
+            temp = ['#9fbfff','#a1c0ff']
+            R=[apparent_radius_mas(R_in_sol1, distance_in_pc), apparent_radius_mas(R_in_sol2, distance_in_pc)]
+
+            Omega_ori = st.number_input("Enter longitude of ascending node in degrees:", value=0, min_value=0, max_value=359)
+            omega_ori = st.number_input("Enter argument of periapsis:", value=0, min_value=0, max_value=359)
+
+            IotaOrionis=Orbit(P=29.1338, e=0.764, I=60,
+            Omega=Omega_ori, omega=omega_ori, jdperi=2450072.80, q=(23.1/13.1))
+            binary_selected=IotaOrionis
+
+        if selected_star=="α Virginis (Spica)":
+            R_in_sol1 = 7.4
+            R_in_sol2 = 3.74
+            distance_in_pc = 77
+            temp = ['#a2c1ff','#a7c4ff']
+            R=[apparent_radius_mas(R_in_sol1, distance_in_pc), apparent_radius_mas(R_in_sol2, distance_in_pc)]
+            spica = Orbit(P=4.01, e=0.123, I=63,
+                Omega=309.938, omega=2136.727, jdperi=2440678.008, q=0.6188)  
+            binary_selected=spica
 
         if two_telescopes_location=="baseline":
-            st.write("Indicate the orientation angle of the baseline.")
-            angle = st.number_input("Angle of orientation in degrees:", min_value=0, max_value=359, value=90, help="i.e. 0° corresponds to $x_N$=baseline, $x_E$=0; 90° corresponds to $x_N$=0, $x_E$=baseline and so on.")
+            if baseline==0:
+                plt.text(0.8, 0.6, "Please enter a non-zero baseline", size=10, rotation=0.,
+                ha="right", va="top",
+                bbox=dict(boxstyle="square",
+                    ec=(1., 0.5, 0.5),
+                    fc=(1., 0.8, 0.8),
+                    )
+                )
+                ax2.set_title("Visibility Map of "+ BayerF + ", diameter: " + str(diameter_V) + " mas\n "
+                            "$\Phi$ = " + str(np.round(Phi_V, 7)) + " photons m$^{-2}$ s$^{-1}$ Hz$^{-1}$")
+                ax2.set_xlabel('U [m]')
+                ax2.set_ylabel('V [m]')
+                ax2.set_aspect('equal')
+                col2.pyplot(fig2)
 
-            x_E = np.sin(2*np.pi*angle/360)*baseline
-            x_N = np.cos(2*np.pi*angle/360)*baseline
+        ds = 6e-10
+        N = 2048
+        sx,sy,x,y = grids(ds,N,lambda_V)
 
-        selected_star = st.selectbox('Select a star:', options=df_all_stars['Identifier'], help="The stars are sorted by brightness i.e. the apparent magnitude")
-        star_details = df_all_stars[df_all_stars['Identifier'] == selected_star].iloc[0]
+        scl = 8e-9 # orbital a in radians
+        mscl = scl*(3000/np.pi*60**3)
         
-        star_of_interest = f"{star_details['BayerF']},{star_details['Common']},{star_details['Parallax']},{star_details['Distance']},{star_details['Umag']},{star_details['Vmag']},{star_details['Bmag']},{star_details['Temp']},{star_details['RA_decimal']},{star_details['Dec_decimal']},{star_details['RA']},{star_details['Dec']},{star_details['Diameter_U']},{star_details['Diameter_V']},{star_details['Diameter_B']},{star_details['Phi_U']},{star_details['Phi_V']},{star_details['Phi_B']}"
-        
-        values = star_of_interest.split(',')
-        BayerF = values[0]
-        given_ra_decimal = float(values[8])
-        given_dec_decimal = float(values[9])
-        diameter_V = float(values[13])
-        Phi_V = float(values[16])
-        diameter_in_rad = diameter_V / 1000 * np.pi / (3600 * 180)
-        
-        lat = lat_dec1
-        lon = lon_dec1
+        F = len(times)  # Total frames are now determined by the length of 'times'
 
+        fr = st.slider(
+            "Select the frame",
+            0,
+            F - 1,  # Adjust slider range to be 0-indexed
+            value=10,
+            step=1,
+            help="This slider controls which moment in the night is displayed."
+        )
 
-        if baseline==0:
-            st.write("Please enter a baseline that is non-zero to see the trace on the visibility map.")
-        
-        # Parse the input string into a datetime object
-        date_obj = datetime.strptime(date_str, '%Y-%m-%d')
-        
-        # Convert the date object to a Julian date
-        date_JD = date_obj.toordinal() + 1721425 + .33333 - (1 / 24) * utc_offset
-        
-        # Create a Time object from the observation time in Julian date
-        observation_time_utc = Time(date_JD, format='jd')
-        
-        equatorial_coords = SkyCoord(given_ra_decimal, given_dec_decimal, unit=(u.hourangle, u.deg), frame='icrs')
-        
-        # Define time range for trail calculation
-        hours_before = -1 / 3600
-        hours_after = 12.001 if two_telescopes_location == "coordinates" else 24.001
-        
-        start_time = observation_time_utc - TimeDelta(hours_before * u.hour)
-        end_time = observation_time_utc + TimeDelta(hours_after * u.hour)
-        times = start_time + (end_time - start_time) * np.linspace(0, 1, 97)[:, None]
-        
-        # Calculate coordinates at each time step
-        altitudes = []
-        azimuths = []
-        
-        for time in times:
-            altaz_coords = equatorial_coords.transform_to(
-                AltAz(obstime=time, location=EarthLocation(lat=lat, lon=lon, height=height1)))
-            altitudes.append(altaz_coords.alt)
-            azimuths.append(altaz_coords.az)
-        
-        # Convert lists to arrays
-        altitudes = np.array(altitudes)
-        azimuths = np.array(azimuths)
-        azimuths_flat = azimuths.flatten()
-        datetime_objects = [Time(time[0]).to_datetime() for time in times]
-        
-        # Extract only the time component from datetime objects and convert to string
-        time_components = [dt.time().strftime('%H:%M') for dt in datetime_objects]
-        
-        # Create columns for the plots
-        col1, col2 = st.columns(2)
-        
-        # Plot the trail in the first column
-        fig1, ax1 = plt.subplots()
-        sc = ax1.scatter(time_components, altitudes, c=azimuths_flat)
-        plt.colorbar(sc, label='Azimuth [°]', ax=ax1)  # Add color bar indicating azimuth
-        ax1.set_xticks(time_components[::12])
-        ax1.set_title("Celestial Path of "+ BayerF)
-        ax1.set_xlabel('Time')
-        ax1.set_ylabel('Altitude [°]')
-        ax1.set_ylim(0, 90)
-        ax1.grid(True)
-        col1.pyplot(fig1)
-        
+        # Access the current_time directly from the 'times' array
+        current_time = Time(times[fr][0]).to_datetime() 
+        st.write(f"Selected time: {current_time.strftime('%H:%M')}")
+
+        jd = times[fr][0].jd 
+        xp, yp = binary_selected.binarypos(jd-0.1)
+        dis = scl * ((xp[0] - xp[1]) ** 2 + (yp[0] - yp[1]) ** 2) ** (1/2)
+        phi = np.arctan2(yp[1], xp[1])
+        sig = visib(x, y, lambda_V, dis, phi)  # Assuming visib() is defined
+        sig /= np.max(sig)
+
+        # Subplot 2
+        cs= draw(x, y, sig, 2, 'ground', ax2, cmap='gray') 
+
+        mark_size=15
+        edge=0.5
+
         U = []
         V = []
         W = []
         
+        for time in times:
+            HA_value = RA_2_HA(given_ra_decimal, time.jd)
+            matrices = R_x(given_dec_decimal * u.deg).dot(R_y(HA_value * u.deg)).dot(R_x(-lat * u.deg))
+            h_plane = np.array([[x_E], [x_N], [x_up]])
+            UVW_plane = matrices.dot(h_plane)
+            
+            U.append(UVW_plane[0][0])
+            V.append(UVW_plane[1][0])
+            W.append(UVW_plane[2][0])
         
+        ax2.plot(U, V, '.', color='gold', markeredgecolor='black', markersize=mark_size, markeredgewidth=edge)
+        ax2.plot()
 
+        U_neg = [-u for u in U]
+        V_neg = [-v for v in V]
+
+
+        ax2.plot(U_neg, V_neg, '.', color='gold', markeredgecolor='black', markersize=mark_size, markeredgewidth=edge)
+
+        U = []
+        V = []
+        W = []
+
+        # Create a grid of points
+        resolution = 300
+        size_to_plot = np.sqrt(x_E**2 + x_N**2 + x_up**2)
+        x = np.linspace(-size_to_plot, size_to_plot, resolution)
+        y = np.linspace(-size_to_plot, size_to_plot, resolution)
+        col=temp
+        X, Y = np.meshgrid(x, y)
+
+
+        # Difference in height (x_up)
+        delta_height = height2 - height1
+        x_up = delta_height
+        
+        HA_value = RA_2_HA_single(given_ra_decimal, jd)
+        matrices = R_x(given_dec_decimal * u.deg).dot(R_y(HA_value * u.deg)).dot(R_x(-lat * u.deg))
+        h_plane = np.array([[x_E], [x_N], [x_up]])
+        UVW_plane = matrices.dot(h_plane)
+            
+        U = UVW_plane[0, 0]
+        V = UVW_plane[1, 0]
+        W = UVW_plane[2, 0]
+
+        # Plot the UVW plane in the second column
+
+        ax2.plot(U, V, '.', color='red', markeredgecolor='black', markersize=mark_size, markeredgewidth=edge)
+        ax2.plot(-U, -V, '.', color='red', markeredgecolor='black', markersize=mark_size, markeredgewidth=edge)
+
+        ax2.set_title("Visibility Map of "+ BayerF + ", diameter: " + str(diameter_V) + " mas\n "
+                        "$\Phi$ = " + str(np.round(Phi_V, 7)) + " photons m$^{-2}$ s$^{-1}$ Hz$^{-1}$")
+        ax2.set_xlabel('U [m]')
+        ax2.set_ylabel('V [m]')
+        ax2.set_aspect('equal')
+        plt.colorbar(cs, ax=ax2, label="Intensity")
+
+
+
+        # Plot the UVW plane in the second column
+        if two_telescopes_location=="baseline":
+            if baseline==0:
+                plt.text(0.8, 0.6, "Please enter a non-zero baseline", size=10, rotation=0.,
+                ha="right", va="top",
+                bbox=dict(boxstyle="square",
+                    ec=(1., 0.5, 0.5),
+                    fc=(1., 0.8, 0.8),
+                    )
+                )
+                ax2.set_title("Visibility Map of "+ BayerF + ", diameter: " + str(diameter_V) + " mas\n "
+                            "$\Phi$ = " + str(np.round(Phi_V, 7)) + " photons m$^{-2}$ s$^{-1}$ Hz$^{-1}$")
+                ax2.set_xlabel('U [m]')
+                ax2.set_ylabel('V [m]')
+                ax2.set_aspect('equal')
+                col2.pyplot(fig2)
+
+        
+        
+        if two_telescopes_location=="baseline":
+            if baseline>0:
+                col2.pyplot(fig2)
+        if two_telescopes_location=="coordinates":
+            col2.pyplot(fig2)
+
+        fig3, ax3 = plt.subplots(figsize=(8, 6))
+        
+        # Subplot 3
+        ax3.set_xlim((-mscl, mscl))
+        ax3.set_ylim((-mscl, mscl))
+        ax3.set_aspect('equal')
+
+        for k in range(2):
+            ax3.add_patch(plt.Circle((mscl * xp[k], mscl * yp[k]), mscl * R[k], color=col[k]))
+        ax3.set_xlabel('mas')
+        ax3.set_ylabel('mas')
+        ax3.set_title("Positions of the binaries "+ BayerF)
+        st.pyplot(fig3)
+        
+    else:
+
+
+        U = []
+        V = []
+        W = []
+        
         # Create a grid of points
         resolution = 300
         size_to_plot = np.sqrt(x_E**2 + x_N**2 + x_up**2)
@@ -531,25 +716,33 @@ with st.form("key2"):
         
         # Plot the UVW plane in the second column
         fig2, ax2 = plt.subplots()
-        if baseline==0:
-            plt.text(0.8, 0.6, "Please enter a non-zero baseline", size=10, rotation=0.,
-            ha="right", va="top",
-            bbox=dict(boxstyle="square",
-                   ec=(1., 0.5, 0.5),
-                   fc=(1., 0.8, 0.8),
-                   )
-            )
-            ax2.set_title("Visibility Map of "+ BayerF + ", diameter: " + str(diameter_V) + " mas\n "
-                          "$\Phi$ = " + str(np.round(Phi_V, 7)) + " photons m$^{-2}$ s$^{-1}$ Hz$^{-1}$")
-            ax2.set_xlabel('U [m]')
-            ax2.set_ylabel('V [m]')
-            ax2.set_aspect('equal')
-            col2.pyplot(fig2)
+        if two_telescopes_location=="baseline":
+            if baseline==0:
+                plt.text(0.8, 0.6, "Please enter a non-zero baseline", size=10, rotation=0.,
+                ha="right", va="top",
+                bbox=dict(boxstyle="square",
+                    ec=(1., 0.5, 0.5),
+                    fc=(1., 0.8, 0.8),
+                    )
+                )
+                ax2.set_title("Visibility Map of "+ BayerF + ", diameter: " + str(diameter_V) + " mas\n "
+                            "$\Phi$ = " + str(np.round(Phi_V, 7)) + " photons m$^{-2}$ s$^{-1}$ Hz$^{-1}$")
+                ax2.set_xlabel('U [m]')
+                ax2.set_ylabel('V [m]')
+                ax2.set_aspect('equal')
+                col2.pyplot(fig2)
 
         cax = ax2.imshow(intensity_values, norm=None, extent=(-size_to_plot, size_to_plot, -size_to_plot, size_to_plot), origin='lower', cmap='gray')
         ax2.plot(U, V, '.', color='gold', markeredgecolor='black')
+
+        U_neg = [-u for u in U]
+        V_neg = [-v for v in V]
+
+
+        ax2.plot(U_neg, V_neg, '.', color='gold', markeredgecolor='black')
+
         ax2.set_title("Visibility Map of "+ BayerF + ", diameter: " + str(diameter_V) + " mas\n "
-                          "$\Phi$ = " + str(np.round(Phi_V, 7)) + " photons m$^{-2}$ s$^{-1}$ Hz$^{-1}$")
+                        "$\Phi$ = " + str(np.round(Phi_V, 7)) + " photons m$^{-2}$ s$^{-1}$ Hz$^{-1}$")
         ax2.set_xlabel('U [m]')
         ax2.set_ylabel('V [m]')
         ax2.set_aspect('equal')
@@ -558,6 +751,5 @@ with st.form("key2"):
             if baseline>0:
                 col2.pyplot(fig2)
         if two_telescopes_location=="coordinates":
-            if x_E>0:
-                col2.pyplot(fig2)
+            col2.pyplot(fig2)
 
