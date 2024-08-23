@@ -54,9 +54,6 @@ df_all_stars = pd.read_csv(csv_file)
 # Exclude the last 6 columns
 df_display = df_all_stars.iloc[:, :-6]
 
-# Display the DataFrame in Streamlit
-st.write(df_display)
-
 
 
 
