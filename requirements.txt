@@ -10,4 +10,3 @@ astropy
 timezonefinder
 geopy
 plotly
-math
