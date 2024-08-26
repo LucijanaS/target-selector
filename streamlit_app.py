@@ -638,27 +638,6 @@ if two_telescopes=="Yes":
         ax2.set_aspect('equal')
         plt.colorbar(cs, ax=ax2, label="Intensity")
 
-
-
-        # Plot the UVW plane in the second column
-        if two_telescopes_location=="baseline":
-            if baseline==0:
-                plt.text(0.8, 0.6, "Please enter a non-zero baseline", size=10, rotation=0.,
-                ha="right", va="top",
-                bbox=dict(boxstyle="square",
-                    ec=(1., 0.5, 0.5),
-                    fc=(1., 0.8, 0.8),
-                    )
-                )
-                ax2.set_title("Visibility Map of "+ BayerF + ", diameter: " + str(diameter_V) + " mas\n "
-                            "$\Phi$ = " + str(np.round(Phi_V, 7)) + " photons m$^{-2}$ s$^{-1}$ Hz$^{-1}$")
-                ax2.set_xlabel('U [m]')
-                ax2.set_ylabel('V [m]')
-                ax2.set_aspect('equal')
-                col2.pyplot(fig2)
-
-        
-        
         if two_telescopes_location=="baseline":
             if baseline>0:
                 col2.pyplot(fig2)
