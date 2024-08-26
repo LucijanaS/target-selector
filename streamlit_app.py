@@ -229,7 +229,7 @@ if map:
     # Display the map with the points
     st.map(df, size=1, zoom=15)
 
-number_of_stars = st.sidebar.number_input("Number of brightest stars to check:", min_value=10, max_value=1600, help="Going through all of the 1500 stars can take up to 5 minutes, so here you can specify how" 
+number_of_stars = st.sidebar.number_input("Number of brightest stars to check:", min_value=1, max_value=1600, value=50, help="Going through all of the 1500 stars can take up to 5 minutes, so here you can specify how" 
                                           "many of the brightest stars you want to check for a particular night. A recommended choice would be 50-100, this takes up to 30s to calculate.")
 
 if two_telescopes=="Yes":
@@ -749,4 +749,3 @@ if two_telescopes=="Yes":
                 col2.pyplot(fig2)
         if two_telescopes_location=="coordinates":
             col2.pyplot(fig2)
-
