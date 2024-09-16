@@ -178,17 +178,17 @@ if coordinates_form=="decimal degrees (DD)":
     if two_telescopes == "No":
 
         lat_dec1 = st.sidebar.number_input("Latitude degree:", format="%.5f", value=-23.3422040)
-        lon_dec1 = st.sidebar.number_input("Latitude minute:", format="%.5f", value=16.2249443)
+        lon_dec1 = st.sidebar.number_input("Longitude degree:", format="%.5f", value=16.2249443)
 
     if two_telescopes == "Yes":
         
         lat_dec1 = st.sidebar.number_input("Latitude degree for the first telescope:", format="%.5f", value=-23.3422040)
-        lon_dec1 = st.sidebar.number_input("Latitude minute for the first telescope:", format="%.5f", value=16.2249443)
+        lon_dec1 = st.sidebar.number_input("Longitude degree for the first telescope:", format="%.5f", value=16.2249443)
         
         if two_telescopes_location=="coordinates":
         
             lat_dec2 = st.sidebar.number_input("Latitude degree for the second telescope:", format="%.5f", value=-23.3415711)
-            lon_dec2 = st.sidebar.number_input("Latitude minute for the second telescope:", format="%.5f", value=16.2244744)
+            lon_dec2 = st.sidebar.number_input("Longitude degree for the second telescope:", format="%.5f", value=16.2244744)
 
 
 
