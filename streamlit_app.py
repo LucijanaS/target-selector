@@ -499,8 +499,8 @@ if two_telescopes=="Yes":
         st.write("To see how the visibility map changes, you have now a slider to select the frame.")
 
         fig2, ax2 = plt.subplots(figsize=(8, 6))
-        spica = Orbit(P=4.01, e=0.123, I=63,
-            Omega=309.938, omega=2136.727, jdperi=2440678.008, q=0.6188)             
+        spica = Orbit(P=4.01, e=0.123, I=116,
+            Omega=309.938, omega=136.727, jdperi=2440678.008, q=0.6188)             
         
         if selected_star=="ι Orionis (Nair Al Saif)":
             R_in_sol1 = 8.3
