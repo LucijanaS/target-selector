@@ -67,6 +67,61 @@ def site_utc_offset(lat, lon, date):
     hours = float(round(float(lon) / 15.0))
     return hours, f"UTC{_fmt_offset(hours)} (estimated from longitude)"
 
+
+# ---------------------------------------------------------------------------------------------------------------------------------------
+# UV-coverage quality -- being above the horizon is necessary but not sufficient. A good SII
+# target is one whose UV track sweeps the informative part of the visibility curve: the first
+# lobe -> first null -> first side-lobe, where |V|^2 changes steeply with baseline and carries
+# the diameter / limb-darkening signal. This scores that with geometry only (no noise model).
+# ---------------------------------------------------------------------------------------------------------------------------------------
+
+X_RESOLVED = 1.0            # x = pi*rho*theta/lambda below this -> |V|^2 ~ 1, star barely resolved
+X_FIRST_NULL = 3.8317059    # first zero of J1 -> |V|^2 = 0
+X_SIDELOBE_PEAK = 5.1356    # first side-lobe peak of the Airy pattern
+X_INFORMATIVE_MAX = 6.0     # past the first side-lobe -> diminishing returns
+
+# |d|V|^2 / d ln x| of the uniform-disk curve on a fixed x grid, to weight each traced point
+# by how much information it carries (near zero on the unresolved plateau, large near the null).
+_X_GRID = np.linspace(0.02, 9.0, 3000)
+_STEEPNESS_GRID = np.abs(np.gradient(visibility(_X_GRID, 1.0, np.pi), np.log(_X_GRID)))
+_STEEPNESS_REF = _STEEPNESS_GRID.max()
+
+
+def coverage_score(rho_m, theta_rad, lambda_m):
+    """0-100 score (+ diagnostics) for how well traced projected-baseline lengths rho [m]
+    sample the informative part of a star's visibility curve, given theta [rad], lambda [m]."""
+    rho_m = np.asarray(rho_m, dtype=float)
+    rho_m = rho_m[np.isfinite(rho_m) & (rho_m > 0)]
+    if rho_m.size == 0 or not np.isfinite(theta_rad) or theta_rad <= 0:
+        return dict(score=0.0, x_min=0.0, x_max=0.0, rho_max=0.0,
+                    crosses_null=False, reaches_sidelobe=False)
+
+    x = np.pi * rho_m * theta_rad / lambda_m
+    x_min, x_max = float(x.min()), float(x.max())
+
+    lo, hi = max(x_min, X_RESOLVED), min(x_max, X_INFORMATIVE_MAX)
+    span = max(0.0, hi - lo) / (X_INFORMATIVE_MAX - X_RESOLVED)
+    steepness = float(np.clip(
+        (np.interp(x, _X_GRID, _STEEPNESS_GRID) / _STEEPNESS_REF).mean(), 0.0, 1.0))
+    crosses_null = x_min < X_FIRST_NULL < x_max
+    reaches_sidelobe = x_max >= 0.9 * X_SIDELOBE_PEAK
+
+    score = 100.0 * float(np.clip(
+        0.45 * span + 0.40 * steepness + 0.10 * crosses_null + 0.05 * reaches_sidelobe, 0.0, 1.0))
+    return dict(score=score, x_min=x_min, x_max=x_max, rho_max=float(rho_m.max()),
+                crosses_null=bool(crosses_null), reaches_sidelobe=bool(reaches_sidelobe))
+
+
+def score_verdict(d):
+    if d["x_max"] < X_RESOLVED:
+        return "barely resolved by this array tonight — weak candidate"
+    if d["score"] >= 70:
+        return "track sweeps the first null and side-lobe — strong candidate"
+    if d["score"] >= 40:
+        return "partial coverage of the informative region"
+    return "track mostly on the flat part of the curve — limited diameter leverage"
+
+
 # ---------------------------------------------------------------------------------------------------------------------------------------
 # Catalogue loading -- built once and cached, so changing a sidebar widget does not
 # re-parse bsc5-all.json and re-run process_star for every star on every rerun. Nothing
@@ -139,6 +194,27 @@ def search_visible_stars(ra_hours, dec_deg, lat, lon, height_m, date_str,
         if observable >= 0.75 * n_dark:
             kept.append(i)
     return kept, dark_hours
+
+
+@st.cache_data(show_spinner="Scoring UV coverage…")
+def score_candidates(ra_hours, dec_deg, theta_mas, lat, lon, height_m, date_str,
+                     min_altitude_deg, baselines_t, lambda_m):
+    """coverage_score() dict per star, using each star's own observable window and the UV
+    tracks of every array baseline. `baselines_t` is a tuple of (label, (E, N, Up))."""
+    out = []
+    for ra_h, dec_d, th_mas in zip(ra_hours, dec_deg, theta_mas):
+        tj = find_observable_times(ra_h, dec_d, lat, lon, date_str,
+                                   height_m=height_m, min_altitude_deg=min_altitude_deg)
+        if len(tj) < 3 or not baselines_t:
+            out.append(None)
+            continue
+        rho = np.concatenate([
+            np.hypot(*compute_uvw_track(ra_h, dec_d, lat, lon, enu, tj)[:2])
+            for _, enu in baselines_t
+        ])
+        theta_rad = float(th_mas) / 1000 * np.pi / (3600 * 180)
+        out.append(coverage_score(rho, theta_rad, lambda_m))
+    return out
 
 
 # ---------------------------------------------------------------------------------------------------------------------------------------
@@ -345,11 +421,13 @@ if show_map:
 # Stars to run through
 # ---------------------------------------------------------------------------------------------------------------------------------------
 
-st.markdown("## Stars visible on the night of " + date_str)
+st.markdown("## Candidate stars for the night of " + date_str)
 st.write(
-    "The table below lists the brightest " + str(int(number_of_stars)) + " stars the search will run "
-    "through. Press **Search** to keep only those that stay above " + str(min_altitude_deg) +
-    "° while the Sun is down for at least 3/4 of the night."
+    "The table below lists the brightest " + str(int(number_of_stars)) + " stars the search runs "
+    "through. Press **Search** to keep those that stay above " + str(min_altitude_deg) +
+    "° while the Sun is down for at least 3/4 of the night" +
+    (", ranked by how well tonight's UV track covers the informative part of each star's "
+     "visibility curve (**coverage** 0–100)." if baselines else ".")
 )
 st.dataframe(df_display.head(int(number_of_stars)))
 
@@ -374,7 +452,33 @@ if do_search:
             f"Dark window: {dark_hours:.1f} h.  {len(visible)} of the {len(run)} checked stars are "
             f"observable for at least 3/4 of it."
         )
-        st.dataframe(visible[display_cols])
+
+        if baselines and len(visible):
+            theta_col = visible[f"Diameter_{band}"].where(
+                visible[f"Diameter_{band}"].notna(), visible["Diameter_V"])
+            scores = score_candidates(
+                tuple(visible['RA_decimal'].astype(float)),
+                tuple(visible['Dec_decimal'].astype(float)),
+                tuple(theta_col.astype(float)),
+                float(lat_dec1), float(lon_dec1), float(height1),
+                date_str, float(min_altitude_deg),
+                tuple((lbl, tuple(enu)) for lbl, enu in baselines), float(lambda_sel),
+            )
+            visible['coverage'] = [round(s['score']) if s else np.nan for s in scores]
+            visible['x_range'] = [f"{s['x_min']:.1f}–{s['x_max']:.1f}" if s else "" for s in scores]
+            visible['first_null'] = ['✓' if s and s['crosses_null'] else '' for s in scores]
+            visible = visible.sort_values('coverage', ascending=False, na_position='last') \
+                             .reset_index(drop=True)
+            diam_col = f"Diameter_{band}"
+            cols = ['BayerF', 'Common', 'Vmag', diam_col, 'coverage', 'x_range', 'first_null', 'RA', 'Dec']
+            cols = list(dict.fromkeys(cols))  # de-dup if band == V
+            st.dataframe(visible[cols])
+            st.caption("coverage: 0–100 geometric score (track vs. the first-lobe→null→side-lobe "
+                       "region).  x = π·ρ·θ/λ; first null at x ≈ 3.83.  first_null ✓ = the track "
+                       "crosses it.")
+        else:
+            st.dataframe(visible[display_cols])
+
         st.download_button(
             "Download list as CSV",
             data=visible.to_csv(index=False),
@@ -457,7 +561,6 @@ else:
         # conjugate -U,-V are measured by an intensity interferometer).
         tracks = [(lbl, compute_uvw_track(given_ra_decimal, given_dec_decimal, lat, lon, enu, times_jd))
                   for lbl, enu in baselines]
-        multi = len(tracks) > 1
         st.caption("Baselines: " +
                    ", ".join(f"{lbl} ({np.linalg.norm(enu):.0f} m)" for lbl, enu in baselines))
 
@@ -495,16 +598,34 @@ else:
         st.pyplot(fig2)
         plt.close(fig2)
 
-        # W (delay) over the night, one line per baseline.
-        fig4, ax4 = plt.subplots(figsize=(9, 3.5))
-        for (lbl, (U, V, W)), c in zip(tracks, TRACK_COLOURS):
-            ax4.plot(time_labels, W, '.', color=c, label=lbl)
-        ax4.set_xticks(time_labels[::xtick_step])
-        ax4.set_xlabel(f'Local time ({tz_label})')
-        ax4.set_ylabel('W [m]')
-        ax4.set_title("Delay W over the night")
-        if multi:
-            ax4.legend(fontsize=7)
-        ax4.grid(True)
-        st.pyplot(fig4)
-        plt.close(fig4)
+        # 1-D visibility curve with the actually-traced points marked on it.
+        if diameter_in_rad > 0:
+            rho_all = np.concatenate([np.hypot(U, V) for _, (U, V, W) in tracks])
+            sc = coverage_score(rho_all, diameter_in_rad, lambda_star)
+            k = lambda_star / (np.pi * diameter_in_rad)          # rho = k * x
+            r_null, r_slobe = X_FIRST_NULL * k, X_SIDELOBE_PEAK * k
+            r_hi = max(rho_all.max() * 1.1, r_slobe * 1.2)
+            rr = np.linspace(r_hi * 1e-3, r_hi, 600)
+
+            fig4, axc = plt.subplots(figsize=(9, 4))
+            axc.axvspan(X_RESOLVED * k, min(X_INFORMATIVE_MAX * k, r_hi),
+                        color="#d9c8a0", alpha=0.30, zorder=0, label="informative band")
+            axc.plot(rr, visibility(rr, diameter_in_rad, lambda_star), "k-", lw=1.6, zorder=2)
+            axc.axvline(r_null, ls="--", color="0.45", lw=1, zorder=1)
+            axc.axvline(r_slobe, ls=":", color="0.45", lw=1, zorder=1)
+            for (lbl, (U, V, W)), c in zip(tracks, TRACK_COLOURS):
+                r_i = np.hypot(U, V)
+                axc.plot(r_i, visibility(r_i, diameter_in_rad, lambda_star), "o", color=c, ms=4,
+                         markeredgecolor="black", markeredgewidth=0.4, label=lbl, zorder=4)
+            axc.set_yscale("log")
+            axc.set_ylim(1e-4, 1.4)
+            axc.set_xlim(0, r_hi)
+            axc.set_xlabel(r"projected baseline  $\rho=\sqrt{U^2+V^2}$  [m]")
+            axc.set_ylabel(r"squared visibility  $|V|^2$")
+            axc.set_title(f"Visibility curve — coverage {sc['score']:.0f}/100: {score_verdict(sc)}")
+            secx = axc.secondary_xaxis("top", functions=(lambda r: r / k, lambda x: x * k))
+            secx.set_xlabel(r"$x=\pi\rho\theta/\lambda$   (first null at 3.83, side-lobe at 5.14)")
+            axc.legend(fontsize=7, loc="lower left", ncol=2, framealpha=0.85)
+            axc.grid(True, which="both", alpha=0.3)
+            st.pyplot(fig4)
+            plt.close(fig4)
