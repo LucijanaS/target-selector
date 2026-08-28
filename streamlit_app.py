@@ -434,7 +434,7 @@ st.write(
     "through. Press **Search** to keep those that stay above " + str(min_altitude_deg) +
     "° while the Sun is down for at least 3/4 of the night" +
     (", ranked by how well tonight's UV track covers the informative part of each star's "
-     "visibility curve (**coverage** 0–100)." if baselines else ".")
+     "visibility curve (coverage 0–100)." if baselines else ".")
 )
 st.dataframe(df_display.head(int(number_of_stars)))
 
@@ -612,29 +612,27 @@ else:
             rho_all = np.concatenate([np.hypot(U, V) for _, (U, V, W) in tracks])
             sc = coverage_score(rho_all, diameter_in_rad, lambda_star)
             k = lambda_star / (np.pi * diameter_in_rad)          # rho = k * x
-            r_null, r_floor = X_FIRST_NULL * k, X_V_FLOOR * k
+            r_null = X_FIRST_NULL * k
             r_hi = max(rho_all.max() * 1.05, r_null * 1.25)
             rr = np.linspace(0, r_hi, 600)
 
             fig4, axc = plt.subplots(figsize=(9, 4))
-            axc.axvspan(0, r_floor, color="#bfe3b0", alpha=0.5, zorder=0,
-                        label=r"bright, high SNR ($|V|^2\geq0.2$)")
-            axc.axvspan(r_floor, r_null, color="#e7dcc0", alpha=0.6, zorder=0, label="usable")
-            axc.axhline(V_SNR_FLOOR, ls=":", color="0.4", lw=1, zorder=1)
+            axc.axhline(V_SNR_FLOOR, ls=":", color="0.55", lw=1, zorder=1)
+            axc.axvline(r_null, ls="--", color="0.55", lw=1, zorder=1)
             axc.plot(rr, visibility(rr, diameter_in_rad, lambda_star), "k-", lw=1.6, zorder=2)
-            axc.axvline(r_null, ls="--", color="0.45", lw=1, zorder=1)
             for (lbl, (U, V, W)), c in zip(tracks, TRACK_COLOURS):
                 r_i = np.hypot(U, V)
                 axc.plot(r_i, visibility(r_i, diameter_in_rad, lambda_star), "o", color=c, ms=4,
-                         markeredgecolor="black", markeredgewidth=0.4, label=lbl, zorder=4)
+                         markeredgecolor="black", markeredgewidth=0.4, zorder=4)
             axc.set_ylim(0, 1.05)
             axc.set_xlim(0, r_hi)
             axc.set_xlabel(r"projected baseline  $\rho=\sqrt{U^2+V^2}$  [m]")
             axc.set_ylabel(r"squared visibility  $|V|^2$")
-            axc.set_title(f"Visibility curve — coverage {sc['score']:.0f}/100: {score_verdict(sc)}")
+            axc.set_title(f"{selected_star} — {date_str}")
             secx = axc.secondary_xaxis("top", functions=(lambda r: r / k, lambda x: x * k))
             secx.set_xlabel(r"$x=\pi\rho\theta/\lambda$   ($|V|^2=1$ at 0, first null at 3.83)")
-            axc.legend(fontsize=7, loc="upper right", framealpha=0.85)
             axc.grid(True, alpha=0.3)
             st.pyplot(fig4)
             plt.close(fig4)
+            st.caption(f"Coverage {sc['score']:.0f}/100 — {score_verdict(sc)}  "
+                       f"(dotted: |V|² = 0.2 SNR floor;  dashed: first null).")

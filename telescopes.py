@@ -117,4 +117,16 @@ TELESCOPE_PRESETS = {
         dishes=None, site_lat=28.7616, site_lon=-17.8906, site_height_m=2200.0, approx=True,
         note="Placeholder site centre — enter an LST pair baseline manually for now.",
     ),
+
+    "Narrabri NSII (Paul Wild Obs., Australia)": dict(
+        dishes=None, site_lat=-30.3128, site_lon=149.5501, site_height_m=217.0, approx=True,
+        note="Hanbury Brown & Twiss 1963–74. Two 6.5 m reflectors on a 188 m circular rail — "
+             "baseline continuously variable 0–188 m; enter the value you want.",
+    ),
+
+    "StarBase Utah (Grantsville)": dict(
+        dishes=None, site_lat=40.6939, site_lon=-112.4611, site_height_m=1310.0, approx=True,
+        note="Placeholder site centre — University of Utah SII testbed, two 3 m dishes ~23 m "
+             "apart. Enter the baseline manually.",
+    ),
 }
