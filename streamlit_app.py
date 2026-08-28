@@ -4,7 +4,9 @@ import datetime
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import pytz
 import streamlit as st
+from timezonefinder import TimezoneFinder
 
 import astropy.units as u
 from astropy.time import Time
@@ -32,6 +34,38 @@ from telescope_coords import parse_lat_lon
 BANDS = {"V": lambda_V, "B": lambda_B, "U": lambda_U}
 
 n_brightest_stars = 10000
+
+# High-contrast colours for the UV tracks -- the visibility map is near-black away from
+# the centre, so tab10's darker entries vanish on it.
+TRACK_COLOURS = ["#ffd400", "#00e5ff", "#ff4dd2", "#7CFC00", "#ff8c00",
+                 "#ffffff", "#00ff9c", "#ff5555"]
+
+
+@st.cache_resource
+def _timezone_finder():
+    return TimezoneFinder()
+
+
+def _fmt_offset(hours):
+    sign = "+" if hours >= 0 else "-"
+    hours = abs(hours)
+    return f"{sign}{int(hours):02d}:{int(round((hours - int(hours)) * 60)):02d}"
+
+
+@st.cache_data(show_spinner=False)
+def site_utc_offset(lat, lon, date):
+    """(offset_hours, label) for the site on `date`, from its IANA time zone (DST-aware);
+    falls back to lon/15 if the zone can't be resolved (e.g. mid-ocean)."""
+    try:
+        name = _timezone_finder().timezone_at(lat=float(lat), lng=float(lon))
+        if name:
+            off = pytz.timezone(name).utcoffset(datetime.datetime.combine(date, datetime.time(0, 0)))
+            hours = off.total_seconds() / 3600.0
+            return hours, f"{name}, UTC{_fmt_offset(hours)}"
+    except Exception:
+        pass
+    hours = float(round(float(lon) / 15.0))
+    return hours, f"UTC{_fmt_offset(hours)} (estimated from longitude)"
 
 # ---------------------------------------------------------------------------------------------------------------------------------------
 # Catalogue loading -- built once and cached, so changing a sidebar widget does not
@@ -173,14 +207,10 @@ band = st.sidebar.radio(
 )
 lambda_sel = BANDS[band]
 
-utc_offset = st.sidebar.number_input(
-    "UTC offset (for displaying local time on the altitude plot only):",
-    min_value=-12, max_value=12, step=1, value=+2,
-)
-
 # --- Site + baselines ---------------------------------------------------------------
 # Produces:  lat_dec1, lon_dec1, height1  -- observer site, for the observability window
 #            baselines : list of (label, (x_E, x_N, x_up))  -- one entry per dish pair
+#            utc_offset / tz_label       -- derived from the site, for local-time axes
 lat_dec2 = lon_dec2 = None
 height1 = 0.0
 height2 = 0.0
@@ -190,17 +220,14 @@ baselines = []
 site_lat, site_lon, site_height = preset_site(preset)
 
 if preset_has_dishes(preset):
-    lat_dec1 = st.sidebar.number_input("Site latitude [deg]:", value=float(site_lat), format="%.5f")
-    lon_dec1 = st.sidebar.number_input("Site longitude [deg]:", value=float(site_lon), format="%.5f")
-    height1 = st.sidebar.number_input("Site elevation [m]:", value=float(site_height), format="%.1f")
-    st.sidebar.caption("Site fields drive the observability window only; the baselines come "
-                       "from the fixed array geometry.")
-    all_baselines = pairwise_baselines(preset["dishes"])
-    labels = [lbl for lbl, _ in all_baselines]
-    chosen = st.sidebar.multiselect(
-        f"Baselines to plot ({len(labels)} available)", labels, default=labels,
+    # Fully determined by the dish coordinates -- nothing to enter here.
+    lat_dec1, lon_dec1, height1 = float(site_lat), float(site_lon), float(site_height)
+    baselines = pairwise_baselines(preset["dishes"])
+    st.sidebar.caption(
+        f"Site: {lat_dec1:.4f}°, {lon_dec1:.4f}°, {height1:.0f} m — "
+        f"{len(baselines)} baseline{'s' if len(baselines) != 1 else ''} "
+        f"({', '.join(lbl for lbl, _ in baselines)})."
     )
-    baselines = [(lbl, enu) for lbl, enu in all_baselines if lbl in chosen]
 else:
     two_telescopes = st.sidebar.radio(
         "Two telescopes?",
@@ -278,8 +305,9 @@ else:
         baselines = [("T1–T2", latlon_to_enu(lat_dec1, lon_dec1, height1,
                                              lat_dec2, lon_dec2, height2))]
 
-baseline_lengths = [float(np.linalg.norm(enu)) for _, enu in baselines]
-max_baseline = max(baseline_lengths) if baseline_lengths else 1.0
+# Local-time offset for the plot axes, derived from the site (no manual entry).
+utc_offset, tz_label = site_utc_offset(lat_dec1, lon_dec1, date)
+st.sidebar.caption(f"🕑 Local time on the plots: {tz_label}")
 
 min_altitude_deg = st.sidebar.slider(
     "Minimum star altitude [deg]:", min_value=0, max_value=60, value=10,
@@ -414,7 +442,7 @@ else:
     plt.colorbar(sc, label='Azimuth [°]', ax=ax1)
     ax1.set_xticks(time_labels[::xtick_step])
     ax1.set_title("Celestial path of " + str(BayerF))
-    ax1.set_xlabel(f'Local time (UTC{utc_offset:+d})')
+    ax1.set_xlabel(f'Local time ({tz_label})')
     ax1.set_ylabel('Altitude [°]')
     ax1.set_ylim(0, 90)
     ax1.grid(True)
@@ -422,50 +450,57 @@ else:
     plt.close(fig1)
 
     if not baselines:
-        st.info("Pick a telescope preset with dishes, or set **Two telescopes → Yes** with a "
+        st.info("Choose a telescope-array preset, or set **Two telescopes → Yes** with a "
                 "non-zero baseline, to see the visibility map and UV coverage.")
     else:
-        st.caption("Baselines plotted: " +
-                   ", ".join(f"{lbl} ({np.linalg.norm(enu):.0f} m)" for lbl, enu in baselines))
-
-        # One UVW track per baseline over the observable window.
+        # One UVW track per baseline over the observable window (both this point and its
+        # conjugate -U,-V are measured by an intensity interferometer).
         tracks = [(lbl, compute_uvw_track(given_ra_decimal, given_dec_decimal, lat, lon, enu, times_jd))
                   for lbl, enu in baselines]
-        colours = plt.cm.tab10(np.linspace(0, 1, 10))[:len(tracks)]
         multi = len(tracks) > 1
-        size_to_plot = max(max_baseline, 1.0)
+        st.caption("Baselines: " +
+                   ", ".join(f"{lbl} ({np.linalg.norm(enu):.0f} m)" for lbl, enu in baselines))
+
+        # Frame the plot to the actual UV coverage, so the tracks fill it rather than
+        # sitting in a corner of a box sized by the nominal baseline length.
+        track_reach = max(np.sqrt(U ** 2 + V ** 2).max() for _, (U, V, W) in tracks)
+        size_to_plot = max(track_reach * 1.15, 1.0)
         title = ("Visibility map of " + str(BayerF) + ", diameter: " + str(diameter_band) +
                  " mas\n Φ = " + str(np.round(phi_band, 7)) + " photons m$^{-2}$ s$^{-1}$ Hz$^{-1}$")
 
-        resolution = 300
+        resolution = 400
         grid = np.linspace(-size_to_plot, size_to_plot, resolution)
         X, Y = np.meshgrid(grid, grid)
-        Rgrid = np.sqrt(X ** 2 + Y ** 2)
-        intensity_values = visibility(Rgrid, diameter_in_rad, lambda_star)
+        intensity_values = visibility(np.sqrt(X ** 2 + Y ** 2), diameter_in_rad, lambda_star)
 
         fig2, ax2 = plt.subplots(figsize=(7, 6))
         cax = ax2.imshow(intensity_values,
                          extent=(-size_to_plot, size_to_plot, -size_to_plot, size_to_plot),
-                         origin='lower', cmap='gray')
-        for (lbl, (U, V, W)), c in zip(tracks, colours):
-            ax2.plot(U, V, '.', color=c, markeredgecolor='black', label=lbl)
-            ax2.plot(-U, -V, '.', color=c, markeredgecolor='black')
+                         origin='lower', cmap='gray', zorder=0)
+        for (lbl, (U, V, W)), c in zip(tracks, TRACK_COLOURS):
+            ax2.plot(U, V, '-', color=c, lw=1.0, alpha=0.9, zorder=3)
+            ax2.plot(U, V, 'o', color=c, ms=4, markeredgecolor='black', markeredgewidth=0.4,
+                     label=lbl, zorder=4)
+            ax2.plot(-U, -V, '-', color=c, lw=1.0, alpha=0.9, zorder=3)
+            ax2.plot(-U, -V, 'o', color=c, ms=4, markeredgecolor='black', markeredgewidth=0.4,
+                     zorder=4)
+        ax2.set_xlim(-size_to_plot, size_to_plot)
+        ax2.set_ylim(-size_to_plot, size_to_plot)
         ax2.set_title(title)
         ax2.set_xlabel('U [m]')
         ax2.set_ylabel('V [m]')
         ax2.set_aspect('equal')
-        if multi:
-            ax2.legend(fontsize=7, loc='upper right')
-        plt.colorbar(cax, label="Intensity")
+        ax2.legend(fontsize=7, loc='upper right', framealpha=0.85)
+        plt.colorbar(cax, label="Squared visibility", ax=ax2)
         st.pyplot(fig2)
         plt.close(fig2)
 
         # W (delay) over the night, one line per baseline.
         fig4, ax4 = plt.subplots(figsize=(9, 3.5))
-        for (lbl, (U, V, W)), c in zip(tracks, colours):
+        for (lbl, (U, V, W)), c in zip(tracks, TRACK_COLOURS):
             ax4.plot(time_labels, W, '.', color=c, label=lbl)
         ax4.set_xticks(time_labels[::xtick_step])
-        ax4.set_xlabel(f'Local time (UTC{utc_offset:+d})')
+        ax4.set_xlabel(f'Local time ({tz_label})')
         ax4.set_ylabel('W [m]')
         ax4.set_title("Delay W over the night")
         if multi:
