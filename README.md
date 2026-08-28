@@ -8,11 +8,10 @@ Given a location (typed in, or chosen from a telescope-coupling preset) and a da
 - lists the brightest stars that stay above a minimum altitude while the Sun is down for
   most of that night's real dark window (sunset/sunrise computed for the site, not a fixed
   clock window). With a telescope array selected, the list is **ranked by a UV-coverage
-  score** (0–100): how much of the night the baseline tracks sit on the *steep descent* of
-  each star's visibility curve (roughly x = π·ρ·θ/λ in 1–3.83), where |V|² changes fast with
-  baseline and so pins the angular diameter — a star being up is necessary but not
-  sufficient. Reaching the first null isn't needed; overshooting past it into the low
-  side-lobes is actually worse.
+  score** (0–100): how much of the SNR-weighted first lobe each star's UV track spans —
+  ideally from a short baseline (bright, |V|² ≈ 1) out toward the first null (x = π·ρ·θ/λ =
+  3.83), with points weighted by |V|² and a floor at 0.2. A star being up is necessary but
+  not sufficient; baseline past the first null is wasted.
 - for a single selected star, plots its sky track, its uniform-disk visibility map with the
   UV tracks of every array baseline, and the **1-D visibility curve** |V|²(ρ) with the
   traced points marked on it and the coverage score / verdict in the title.

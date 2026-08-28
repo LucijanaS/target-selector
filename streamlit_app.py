@@ -69,53 +69,64 @@ def site_utc_offset(lat, lon, date):
 
 
 # ---------------------------------------------------------------------------------------------------------------------------------------
-# UV-coverage quality -- being above the horizon is necessary but not sufficient. To measure a
-# star's angular diameter you want the night's UV track to sit on the *steep* part of the
-# visibility curve: the descent of the first lobe, roughly x = pi*rho*theta/lambda in [1, 3.83].
-# There the slope d|V|^2/d(rho) is large, so |V|^2 pins theta tightly. The flat top (x < ~1)
-# barely constrains it, and the low side-lobes past the first null add little for a diameter.
-# This scores that with geometry only -- no photon-noise model, not a limb-darkening question.
+# UV-coverage quality -- being above the horizon is necessary but not sufficient. The best
+# angular-diameter measurement comes from a UV track that runs from a short baseline (bright,
+# |V|^2 ~ 1) out toward the first null of the visibility curve (x = pi*rho*theta/lambda = 3.83),
+# so the full first lobe is sampled. SNR is higher on the bright part, so points are weighted by
+# |V|^2 with a floor at 0.2 (below that an SII point adds little); baseline past the first null
+# is essentially wasted. The score is how much of that SNR-weighted first lobe the track spans.
+# Geometry only -- no detailed photon-noise model, not a limb-darkening question.
 # ---------------------------------------------------------------------------------------------------------------------------------------
 
-X_RESOLVED = 1.0            # x below this -> |V|^2 within a few % of 1, star barely resolved
-X_FIRST_NULL = 3.8317059    # first zero of J1 -> |V|^2 = 0; right edge of the useful descent
+X_RESOLVED = 0.5            # x below this -> |V|^2 > ~0.94, star barely resolved
+X_FIRST_NULL = 3.8317059    # first zero of J1 -> |V|^2 = 0
+V_SNR_FLOOR = 0.2           # normalised |V|^2 below which an SII point contributes ~nothing
 
-# Curve slope |d|V|^2 / d ln x| on a fixed x grid, normalised so the first-lobe descent peaks
-# near 1. This single weight already encodes "flat top ~ 0, first-lobe descent ~ 1, side-lobes
-# ~ 0.03", so a point's weight is just how much diameter leverage sampling there gives.
-_X_GRID = np.linspace(1e-3, 9.0, 4000)
-_SLOPE_GRID = np.abs(np.gradient(visibility(_X_GRID, 1.0, np.pi), np.log(_X_GRID)))
-_SLOPE_WEIGHT = np.clip(_SLOPE_GRID / _SLOPE_GRID[_X_GRID < X_FIRST_NULL].max(), 0.0, 1.0)
+# SNR weight across the first lobe: normalised |V|^2, floored at V_SNR_FLOOR, on a uniform x grid.
+_X_GRID = np.linspace(0.0, X_FIRST_NULL, 600)
+_V_GRID = visibility(_X_GRID, 1.0, np.pi)                       # normalised |V|^2, 1 -> 0
+_W_GRID = np.where(_V_GRID >= V_SNR_FLOOR, _V_GRID, 0.0)
+_DX = _X_GRID[1] - _X_GRID[0]
+_W_TOTAL = float(_W_GRID.sum() * _DX)                           # the whole SNR-weighted first lobe
+X_V_FLOOR = float(_X_GRID[_V_GRID >= V_SNR_FLOOR][-1])          # x where |V|^2 crosses 0.2 (~2.37)
 
 
 def coverage_score(rho_m, theta_rad, lambda_m):
-    """0-100 score (+ diagnostics) for how well traced projected-baseline lengths rho [m] sit on
-    the steep first-lobe descent of a star's visibility curve, given theta [rad], lambda [m].
-    Score = 100 * (mean curve-slope weight over the traced points)."""
+    """0-100: how much of the SNR-weighted first lobe (rho from a short baseline out to the
+    first null, weighted by |V|^2 with a 0.2 floor) tonight's traced baselines span. Highest
+    when the track runs from the bright part toward the null; baseline past the null is wasted."""
     rho_m = np.asarray(rho_m, dtype=float)
     rho_m = rho_m[np.isfinite(rho_m) & (rho_m > 0)]
     if rho_m.size == 0 or not np.isfinite(theta_rad) or theta_rad <= 0:
-        return dict(score=0.0, x_min=0.0, x_max=0.0, rho_max=0.0, frac_on_slope=0.0)
+        return dict(score=0.0, x_min=0.0, x_max=0.0, rho_max=0.0, frac_bright=0.0)
 
     x = np.pi * rho_m * theta_rad / lambda_m
-    w = np.interp(x, _X_GRID, _SLOPE_WEIGHT)
-    return dict(
-        score=100.0 * float(np.clip(w.mean(), 0.0, 1.0)),
-        x_min=float(x.min()), x_max=float(x.max()), rho_max=float(rho_m.max()),
-        frac_on_slope=float(np.mean(w >= 0.33)),   # fraction of the night usefully on the descent
-    )
+    x_min, x_max = float(x.min()), float(x.max())
+
+    lo, hi = x_min, min(x_max, X_FIRST_NULL)
+    if hi <= lo:                                        # whole track past the first null
+        return dict(score=0.0, x_min=x_min, x_max=x_max, rho_max=float(rho_m.max()), frac_bright=0.0)
+
+    covered = (_X_GRID >= lo) & (_X_GRID <= hi)
+    frac = (_W_GRID[covered].sum() * _DX) / _W_TOTAL
+    overshoot = float(np.mean(x > X_FIRST_NULL))        # part of the night spent past the null
+    score = 100.0 * float(np.clip(frac * (1.0 - 0.5 * overshoot), 0.0, 1.0))
+    frac_bright = float(np.mean((x <= X_FIRST_NULL) &
+                                (np.interp(x, _X_GRID, _V_GRID) >= V_SNR_FLOOR)))
+    return dict(score=score, x_min=x_min, x_max=x_max, rho_max=float(rho_m.max()),
+                frac_bright=frac_bright)
 
 
 def score_verdict(d):
-    if d["x_max"] < X_RESOLVED:
-        return "still on the flat top of the curve — star barely resolved by this array tonight"
     if d["x_min"] > X_FIRST_NULL:
-        return "over-resolved — track sits past the first null, in the low side-lobes"
-    if d["score"] >= 55:
-        return "track sits on the steep first-lobe descent — good diameter leverage"
-    if d["score"] >= 25:
-        return "track partly samples the first-lobe descent"
-    return "track mostly on the flat part of the curve — weak diameter leverage"
+        return "over-resolved — the whole track is past the first null"
+    if d["x_max"] < X_RESOLVED:
+        return "star barely resolved — track sits at the flat top of the curve"
+    if d["score"] >= 70:
+        return "track spans most of the first lobe from the bright side — excellent for θ"
+    if d["score"] >= 35:
+        return "track covers part of the first lobe"
+    return "track covers little of the first lobe — weak θ leverage"
 
 
 # ---------------------------------------------------------------------------------------------------------------------------------------
@@ -462,17 +473,17 @@ if do_search:
             )
             visible['coverage'] = [round(s['score']) if s else np.nan for s in scores]
             visible['x_range'] = [f"{s['x_min']:.1f}–{s['x_max']:.1f}" if s else "" for s in scores]
-            visible['slope%'] = [round(s['frac_on_slope'] * 100) if s else np.nan for s in scores]
+            visible['bright%'] = [round(s['frac_bright'] * 100) if s else np.nan for s in scores]
             visible = visible.sort_values('coverage', ascending=False, na_position='last') \
                              .reset_index(drop=True)
             diam_col = f"Diameter_{band}"
-            cols = ['BayerF', 'Common', 'Vmag', diam_col, 'coverage', 'x_range', 'slope%', 'RA', 'Dec']
+            cols = ['BayerF', 'Common', 'Vmag', diam_col, 'coverage', 'x_range', 'bright%', 'RA', 'Dec']
             cols = list(dict.fromkeys(cols))  # de-dup if band == V
             st.dataframe(visible[cols])
-            st.caption("coverage: 0–100, the mean steepness of each star's visibility curve where "
-                       "tonight's UV track samples it.  x = π·ρ·θ/λ (|V|²=1 at 0, first null at "
-                       "3.83); the useful descent is x ≈ 1–3.83.  slope% = fraction of the night "
-                       "the track is on that descent.")
+            st.caption("coverage: 0–100, how much of the SNR-weighted first lobe (ρ up to the "
+                       "first null, weighted by |V|² with a 0.2 floor) tonight's UV track spans.  "
+                       "x = π·ρ·θ/λ, first null at 3.83.  bright% = fraction of the night the "
+                       "track is where |V|² ≥ 0.2.")
         else:
             st.dataframe(visible[display_cols])
 
@@ -595,33 +606,35 @@ else:
         st.pyplot(fig2)
         plt.close(fig2)
 
-        # 1-D visibility curve with the actually-traced points marked on it.
+        # 1-D visibility curve with the actually-traced points marked on it. Linear y: the first
+        # lobe is what matters, and the side-lobes past the null should look as small as they are.
         if diameter_in_rad > 0:
             rho_all = np.concatenate([np.hypot(U, V) for _, (U, V, W) in tracks])
             sc = coverage_score(rho_all, diameter_in_rad, lambda_star)
             k = lambda_star / (np.pi * diameter_in_rad)          # rho = k * x
-            r_null = X_FIRST_NULL * k
-            r_hi = max(rho_all.max() * 1.1, r_null * 1.6)
-            rr = np.linspace(r_hi * 1e-3, r_hi, 600)
+            r_null, r_floor = X_FIRST_NULL * k, X_V_FLOOR * k
+            r_hi = max(rho_all.max() * 1.05, r_null * 1.25)
+            rr = np.linspace(0, r_hi, 600)
 
             fig4, axc = plt.subplots(figsize=(9, 4))
-            axc.axvspan(X_RESOLVED * k, r_null, color="#d9c8a0", alpha=0.30, zorder=0,
-                        label="steep descent (best for θ)")
+            axc.axvspan(0, r_floor, color="#bfe3b0", alpha=0.5, zorder=0,
+                        label=r"bright, high SNR ($|V|^2\geq0.2$)")
+            axc.axvspan(r_floor, r_null, color="#e7dcc0", alpha=0.6, zorder=0, label="usable")
+            axc.axhline(V_SNR_FLOOR, ls=":", color="0.4", lw=1, zorder=1)
             axc.plot(rr, visibility(rr, diameter_in_rad, lambda_star), "k-", lw=1.6, zorder=2)
             axc.axvline(r_null, ls="--", color="0.45", lw=1, zorder=1)
             for (lbl, (U, V, W)), c in zip(tracks, TRACK_COLOURS):
                 r_i = np.hypot(U, V)
                 axc.plot(r_i, visibility(r_i, diameter_in_rad, lambda_star), "o", color=c, ms=4,
                          markeredgecolor="black", markeredgewidth=0.4, label=lbl, zorder=4)
-            axc.set_yscale("log")
-            axc.set_ylim(1e-4, 1.4)
+            axc.set_ylim(0, 1.05)
             axc.set_xlim(0, r_hi)
             axc.set_xlabel(r"projected baseline  $\rho=\sqrt{U^2+V^2}$  [m]")
             axc.set_ylabel(r"squared visibility  $|V|^2$")
             axc.set_title(f"Visibility curve — coverage {sc['score']:.0f}/100: {score_verdict(sc)}")
             secx = axc.secondary_xaxis("top", functions=(lambda r: r / k, lambda x: x * k))
             secx.set_xlabel(r"$x=\pi\rho\theta/\lambda$   ($|V|^2=1$ at 0, first null at 3.83)")
-            axc.legend(fontsize=7, loc="lower left", ncol=2, framealpha=0.85)
-            axc.grid(True, which="both", alpha=0.3)
+            axc.legend(fontsize=7, loc="upper right", framealpha=0.85)
+            axc.grid(True, alpha=0.3)
             st.pyplot(fig4)
             plt.close(fig4)
