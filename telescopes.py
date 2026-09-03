@@ -58,53 +58,53 @@ def preset_has_dishes(preset):
 
 # --- Real dish coordinates ---------------------------------------------------------------
 # MAGIC / VERITAS / CTAO-South: copied from brightstar/LimbO/telescope_arrays.py
-_MAGIC = [
+_magic = [
     dict(name="MAGIC-1", lat="28 45 40.8N", lon="17 53 26.0W", height=2200.0),
     dict(name="MAGIC-2", lat="28 45 43.1N", lon="17 53 24.2W", height=2200.0),
 ]
-_VERITAS = [
+_veritas = [
     dict(name="T1", lat="31 40 29.6N", lon="110 57 03.5W", height=1275.893),
     dict(name="T2", lat="31 40 28.3N", lon="110 57 06.9W", height=1271.016),
     dict(name="T3", lat="31 40 32.0N", lon="110 57 07.5W", height=1267.358),
     dict(name="T4", lat="31 40 30.3N", lon="110 57 10.0W", height=1268.273),
 ]
-_CTA_SOUTH_LSTS = [
+_cta_south_lsts = [
     dict(name="LST-01", lat="-24.68361537", lon="-70.31570456", height=2165.0),
     dict(name="LST-02", lat="-24.68270683", lon="-70.31633741", height=2160.0),
     dict(name="LST-03", lat="-24.68360410", lon="-70.31698922", height=2162.0),
     dict(name="LST-04", lat="-24.68451264", lon="-70.31635637", height=2164.0),
 ]
 # C2PU / Calern Épsilon + Omicron 1 m telescopes (from brightstar/brightstar_input.py).
-_C2PU = [
+_c2pu = [
     dict(name="Épsilon", lat="43.75370", lon="6.92294", height=1776.507),
     dict(name="Omicron", lat="43.75370", lon="6.92312", height=1783.504),
 ]
 
-CUSTOM = "Custom (enter manually)"
+custom = "Custom (enter manually)"
 
-TELESCOPE_PRESETS = {
-    CUSTOM: dict(
+telescope_presets = {
+    custom: dict(
         dishes=None, approx=False,
         note="Enter site coordinates and baseline by hand, as before.",
     ),
 
     "MAGIC (La Palma)": dict(
-        dishes=_MAGIC, approx=False,
+        dishes=_magic, approx=False,
         note="MAGIC-1 ↔ MAGIC-2, Roque de los Muchachos.",
     ),
 
     "VERITAS (Whipple, Arizona)": dict(
-        dishes=_VERITAS, approx=False,
+        dishes=_veritas, approx=False,
         note="4 telescopes → 6 baselines, Fred Lawrence Whipple Observatory.",
     ),
 
     "CTAO-South LSTs (Paranal, Chile)": dict(
-        dishes=_CTA_SOUTH_LSTS, approx=False,
+        dishes=_cta_south_lsts, approx=False,
         note="4 LSTs → 6 baselines, near Cerro Paranal.",
     ),
 
     "C2PU – Épsilon/Omicron (Calern)": dict(
-        dishes=_C2PU, approx=False,
+        dishes=_c2pu, approx=False,
         note="Épsilon ↔ Omicron 1 m telescopes on the Plateau de Calern.",
     ),
 

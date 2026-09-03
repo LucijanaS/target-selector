@@ -20,7 +20,7 @@ from brightstar_functions import (
     dms_to_decimal, lambda_U, lambda_V, lambda_B,
 )
 from telescopes import (
-    TELESCOPE_PRESETS, CUSTOM, preset_has_dishes, preset_site,
+    telescope_presets, custom, preset_has_dishes, preset_site,
     pairwise_baselines, latlon_to_enu,
 )
 from telescope_coords import parse_lat_lon
@@ -31,13 +31,13 @@ from telescope_coords import parse_lat_lon
 # ---------------------------------------------------------------------------------------------------------------------------------------
 
 # lambda_U / lambda_V / lambda_B come from brightstar_functions.
-BANDS = {"V": lambda_V, "B": lambda_B, "U": lambda_U}
+bands = {"V": lambda_V, "B": lambda_B, "U": lambda_U}
 
 n_brightest_stars = 10000
 
 # High-contrast colours for the UV tracks -- the visibility map is near-black away from
 # the centre, so tab10's darker entries vanish on it.
-TRACK_COLOURS = ["#ffd400", "#00e5ff", "#ff4dd2", "#7CFC00", "#ff8c00",
+track_colours = ["#ffd400", "#00e5ff", "#ff4dd2", "#7CFC00", "#ff8c00",
                  "#ffffff", "#00ff9c", "#ff5555"]
 
 
@@ -78,7 +78,7 @@ def site_utc_offset(lat, lon, date):
 # Reaching the null is not itself rewarded. Geometry only -- no detailed photon-noise model.
 # ---------------------------------------------------------------------------------------------------------------------------------------
 
-X_FIRST_NULL = 3.8317059    # first zero of J1 -> |V|^2 = 0  (baseline rho = 1.22 * lambda / theta)
+x_first_null = 3.8317059    # first zero of J1 -> |V|^2 = 0  (baseline rho = 1.22 * lambda / theta)
 
 
 def coverage_score(rho_m, theta_rad, lambda_m):
@@ -93,22 +93,22 @@ def coverage_score(rho_m, theta_rad, lambda_m):
 
     x = np.pi * rho_m * theta_rad / lambda_m
     x_min, x_max = float(x.min()), float(x.max())
-    lobe_frac = float(max(0.0, min(x_max, X_FIRST_NULL) - min(x_min, X_FIRST_NULL)) / X_FIRST_NULL)
+    lobe_frac = float(max(0.0, min(x_max, x_first_null) - min(x_min, x_first_null)) / x_first_null)
 
-    if x_min > X_FIRST_NULL:                       # whole track past the null -> nothing useful
+    if x_min > x_first_null:                       # whole track past the null -> nothing useful
         return dict(score=0.0, x_min=x_min, x_max=x_max, rho_max=float(rho_m.max()), lobe_frac=0.0)
 
     v_lo = float(visibility(x_min, 1.0, np.pi))                      # brightest point (short baseline)
-    v_hi = float(visibility(min(x_max, X_FIRST_NULL), 1.0, np.pi))   # faintest point inside the lobe
+    v_hi = float(visibility(min(x_max, x_first_null), 1.0, np.pi))   # faintest point inside the lobe
     drop = float(np.clip(v_lo - v_hi, 0.0, 1.0))
-    inside = float(np.mean(x <= X_FIRST_NULL))                       # fraction of the night inside the lobe
+    inside = float(np.mean(x <= x_first_null))                       # fraction of the night inside the lobe
     score = 100.0 * float(np.clip(drop * (0.7 + 0.3 * inside), 0.0, 1.0))
     return dict(score=score, x_min=x_min, x_max=x_max, rho_max=float(rho_m.max()),
                 lobe_frac=lobe_frac)
 
 
 def score_verdict(d):
-    if d["x_min"] > X_FIRST_NULL:
+    if d["x_min"] > x_first_null:
         return "over-resolved — the whole track is past the first null"
     if d["x_max"] < 0.7:
         return "star barely resolved — the track stays on the flat top of the curve"
@@ -261,12 +261,12 @@ date_str = date.isoformat()
 
 preset_name = st.sidebar.selectbox(
     "Telescope coupling",
-    list(TELESCOPE_PRESETS),
+    list(telescope_presets),
     help="Pick a known site + dish pair to auto-fill the coordinates and baseline, or "
          "'Custom' to enter everything by hand.",
 )
-preset = TELESCOPE_PRESETS[preset_name]
-is_custom = preset_name == CUSTOM
+preset = telescope_presets[preset_name]
+is_custom = preset_name == custom
 
 if not is_custom:
     st.sidebar.caption(f"ℹ️ {preset['note']}")
@@ -275,11 +275,11 @@ if not is_custom:
 
 band = st.sidebar.radio(
     "Observing band",
-    list(BANDS),
+    list(bands),
     help="Wavelength band used for the angular diameter, Φ and the visibility map. "
          "U/B are only available for stars that have the corresponding colour index.",
 )
-lambda_sel = BANDS[band]
+lambda_sel = bands[band]
 
 # --- Site + baselines ---------------------------------------------------------------
 # Produces:  lat_dec1, lon_dec1, height1  -- observer site, for the observability window
@@ -583,7 +583,7 @@ else:
         cax = ax2.imshow(intensity_values,
                          extent=(-size_to_plot, size_to_plot, -size_to_plot, size_to_plot),
                          origin='lower', cmap='gray', zorder=0)
-        for (lbl, (U, V, W)), c in zip(tracks, TRACK_COLOURS):
+        for (lbl, (U, V, W)), c in zip(tracks, track_colours):
             ax2.plot(U, V, '-', color=c, lw=1.0, alpha=0.9, zorder=3)
             ax2.plot(U, V, 'o', color=c, ms=4, markeredgecolor='black', markeredgewidth=0.4,
                      label=lbl, zorder=4)
@@ -607,7 +607,7 @@ else:
             rho_all = np.concatenate([np.hypot(U, V) for _, (U, V, W) in tracks])
             sc = coverage_score(rho_all, diameter_in_rad, lambda_star)
             k = lambda_star / (np.pi * diameter_in_rad)          # rho = k * x
-            r_null = X_FIRST_NULL * k
+            r_null = x_first_null * k
             r_hi = max(rho_all.max() * 1.05, r_null * 1.25)
             rr = np.linspace(0, r_hi, 600)
 
@@ -616,7 +616,7 @@ else:
             axc.annotate("first null", xy=(r_null, 1.0), xytext=(-4, 0), textcoords="offset points",
                          ha="right", va="top", fontsize=8, color="0.35")
             axc.plot(rr, visibility(rr, diameter_in_rad, lambda_star), "k-", lw=1.6, zorder=2)
-            for (lbl, (U, V, W)), c in zip(tracks, TRACK_COLOURS):
+            for (lbl, (U, V, W)), c in zip(tracks, track_colours):
                 r_i = np.hypot(U, V)
                 axc.plot(r_i, visibility(r_i, diameter_in_rad, lambda_star), "o", color=c, ms=4,
                          markeredgecolor="black", markeredgewidth=0.4, zorder=4)
