@@ -69,64 +69,54 @@ def site_utc_offset(lat, lon, date):
 
 
 # ---------------------------------------------------------------------------------------------------------------------------------------
-# UV-coverage quality -- being above the horizon is necessary but not sufficient. The best
-# angular-diameter measurement comes from a UV track that runs from a short baseline (bright,
-# |V|^2 ~ 1) out toward the first null of the visibility curve (x = pi*rho*theta/lambda = 3.83),
-# so the full first lobe is sampled. SNR is higher on the bright part, so points are weighted by
-# |V|^2 with a floor at 0.2 (below that an SII point adds little); baseline past the first null
-# is essentially wasted. The score is how much of that SNR-weighted first lobe the track spans.
-# Geometry only -- no detailed photon-noise model, not a limb-darkening question.
+# UV-coverage quality -- being above the horizon is necessary but not sufficient. To pin the
+# angular diameter you want the night's UV track to sweep a big swing in |V|^2: from as bright
+# as the array's shortest baseline allows, down toward (and ideally reaching) the first null,
+# where |V|^2 = 0. The score is the fall-off captured -- |V|^2 at the shortest projected
+# baseline minus |V|^2 at the longest (clipped at the null) -- plus a bonus for reaching the
+# null. It's ~0 for a track stuck on the flat top and for one entirely past the null.
+# Geometry only -- no detailed photon-noise model.
 # ---------------------------------------------------------------------------------------------------------------------------------------
 
-X_RESOLVED = 0.5            # x below this -> |V|^2 > ~0.94, star barely resolved
-X_FIRST_NULL = 3.8317059    # first zero of J1 -> |V|^2 = 0
-V_SNR_FLOOR = 0.2           # normalised |V|^2 below which an SII point contributes ~nothing
-
-# SNR weight across the first lobe: normalised |V|^2, floored at V_SNR_FLOOR, on a uniform x grid.
-_X_GRID = np.linspace(0.0, X_FIRST_NULL, 600)
-_V_GRID = visibility(_X_GRID, 1.0, np.pi)                       # normalised |V|^2, 1 -> 0
-_W_GRID = np.where(_V_GRID >= V_SNR_FLOOR, _V_GRID, 0.0)
-_DX = _X_GRID[1] - _X_GRID[0]
-_W_TOTAL = float(_W_GRID.sum() * _DX)                           # the whole SNR-weighted first lobe
-X_V_FLOOR = float(_X_GRID[_V_GRID >= V_SNR_FLOOR][-1])          # x where |V|^2 crosses 0.2 (~2.37)
+X_FIRST_NULL = 3.8317059    # first zero of J1 -> |V|^2 = 0  (baseline rho = 1.22 * lambda / theta)
 
 
 def coverage_score(rho_m, theta_rad, lambda_m):
-    """0-100: how much of the SNR-weighted first lobe (rho from a short baseline out to the
-    first null, weighted by |V|^2 with a 0.2 floor) tonight's traced baselines span. Highest
-    when the track runs from the bright part toward the null; baseline past the null is wasted."""
+    """0-100: how much of the visibility fall-off (|V|^2 from 1 at rho=0 to 0 at the first null)
+    tonight's track captures -- |V|^2 at the shortest projected baseline minus |V|^2 at the
+    longest, clipped at the null -- plus 25 for the track actually reaching the null."""
     rho_m = np.asarray(rho_m, dtype=float)
     rho_m = rho_m[np.isfinite(rho_m) & (rho_m > 0)]
     if rho_m.size == 0 or not np.isfinite(theta_rad) or theta_rad <= 0:
-        return dict(score=0.0, x_min=0.0, x_max=0.0, rho_max=0.0, frac_bright=0.0)
+        return dict(score=0.0, x_min=0.0, x_max=0.0, rho_max=0.0, reached_null=False)
 
     x = np.pi * rho_m * theta_rad / lambda_m
     x_min, x_max = float(x.min()), float(x.max())
+    reached_null = bool(x_max >= 0.95 * X_FIRST_NULL)
 
-    lo, hi = x_min, min(x_max, X_FIRST_NULL)
-    if hi <= lo:                                        # whole track past the first null
-        return dict(score=0.0, x_min=x_min, x_max=x_max, rho_max=float(rho_m.max()), frac_bright=0.0)
+    if x_min > X_FIRST_NULL:                       # whole track past the null -> nothing useful
+        return dict(score=0.0, x_min=x_min, x_max=x_max, rho_max=float(rho_m.max()),
+                    reached_null=reached_null)
 
-    covered = (_X_GRID >= lo) & (_X_GRID <= hi)
-    frac = (_W_GRID[covered].sum() * _DX) / _W_TOTAL
-    overshoot = float(np.mean(x > X_FIRST_NULL))        # part of the night spent past the null
-    score = 100.0 * float(np.clip(frac * (1.0 - 0.5 * overshoot), 0.0, 1.0))
-    frac_bright = float(np.mean((x <= X_FIRST_NULL) &
-                                (np.interp(x, _X_GRID, _V_GRID) >= V_SNR_FLOOR)))
+    v_lo = float(visibility(x_min, 1.0, np.pi))                      # brightest point (short baseline)
+    v_hi = float(visibility(min(x_max, X_FIRST_NULL), 1.0, np.pi))   # faintest useful point
+    drop = float(np.clip(v_lo - v_hi, 0.0, 1.0))
+    score = 100.0 * float(np.clip(drop + 0.25 * reached_null, 0.0, 1.0))
     return dict(score=score, x_min=x_min, x_max=x_max, rho_max=float(rho_m.max()),
-                frac_bright=frac_bright)
+                reached_null=reached_null)
 
 
 def score_verdict(d):
     if d["x_min"] > X_FIRST_NULL:
         return "over-resolved — the whole track is past the first null"
-    if d["x_max"] < X_RESOLVED:
-        return "star barely resolved — track sits at the flat top of the curve"
-    if d["score"] >= 70:
-        return "track spans most of the first lobe from the bright side — excellent for θ"
-    if d["score"] >= 35:
-        return "track covers part of the first lobe"
-    return "track covers little of the first lobe — weak θ leverage"
+    if d["x_max"] < 0.7:
+        return "star barely resolved — the track stays on the flat top of the curve"
+    if d["score"] >= 75:
+        return ("track sweeps a big swing in |V|²" +
+                (" and reaches the null — excellent for θ" if d["reached_null"] else " — good for θ"))
+    if d["score"] >= 40:
+        return "track captures part of the visibility fall-off"
+    return "track captures only a small part of the fall-off — weak θ leverage"
 
 
 # ---------------------------------------------------------------------------------------------------------------------------------------
@@ -430,69 +420,65 @@ if show_map:
 
 st.markdown("## Candidate stars for the night of " + date_str)
 st.write(
-    "The table below lists the brightest " + str(int(number_of_stars)) + " stars the search runs "
-    "through. Press **Search** to keep those that stay above " + str(min_altitude_deg) +
-    "° while the Sun is down for at least 3/4 of the night" +
-    (", ranked by how well tonight's UV track covers the informative part of each star's "
-     "visibility curve (coverage 0–100)." if baselines else ".")
+    "The brightest " + str(int(number_of_stars)) + " stars that stay above " +
+    str(min_altitude_deg) + "° while the Sun is down for at least 3/4 of the night" +
+    (", ranked by how much of the first lobe of each star's visibility curve tonight's UV "
+     "track sweeps (coverage 0–100)." if baselines else ".") +
+    "  The list updates with the sidebar; it stays put while you pick a star below."
 )
-st.dataframe(df_display.head(int(number_of_stars)))
 
 run = df_all_stars.head(int(number_of_stars)).reset_index(drop=True)
 
-with st.form("search_visible"):
-    st.write("Search for stars observable on the night of ", date_str, " from this site.")
-    do_search = st.form_submit_button("Search")
-
-if do_search:
-    kept_idx, dark_hours = search_visible_stars(
-        tuple(run['RA_decimal'].astype(float)),
-        tuple(run['Dec_decimal'].astype(float)),
-        float(lat_dec1), float(lon_dec1), float(height1),
-        date_str, float(min_altitude_deg),
+kept_idx, dark_hours = search_visible_stars(
+    tuple(run['RA_decimal'].astype(float)),
+    tuple(run['Dec_decimal'].astype(float)),
+    float(lat_dec1), float(lon_dec1), float(height1),
+    date_str, float(min_altitude_deg),
+)
+if dark_hours == 0:
+    st.warning("The Sun never sets at this site on this date — no dark window.")
+else:
+    visible = run.iloc[kept_idx].reset_index(drop=True)
+    st.write(
+        f"Dark window: {dark_hours:.1f} h.  {len(visible)} of the {len(run)} checked stars are "
+        f"observable for at least 3/4 of it."
     )
-    if dark_hours == 0:
-        st.warning("The Sun never sets at this site on this date — no dark window.")
+
+    if baselines and len(visible):
+        theta_col = visible[f"Diameter_{band}"].where(
+            visible[f"Diameter_{band}"].notna(), visible["Diameter_V"])
+        scores = score_candidates(
+            tuple(visible['RA_decimal'].astype(float)),
+            tuple(visible['Dec_decimal'].astype(float)),
+            tuple(theta_col.astype(float)),
+            float(lat_dec1), float(lon_dec1), float(height1),
+            date_str, float(min_altitude_deg),
+            tuple((lbl, tuple(enu)) for lbl, enu in baselines), float(lambda_sel),
+        )
+        visible['coverage'] = [round(s['score']) if s else np.nan for s in scores]
+        visible['x_range'] = [f"{s['x_min']:.1f}–{s['x_max']:.1f}" if s else "" for s in scores]
+        visible['null'] = ['✓' if s and s['reached_null'] else '' for s in scores]
+        visible = visible.sort_values('coverage', ascending=False, na_position='last') \
+                         .reset_index(drop=True)
+        diam_col = f"Diameter_{band}"
+        cols = ['BayerF', 'Common', 'Vmag', diam_col, 'coverage', 'x_range', 'null', 'RA', 'Dec']
+        cols = list(dict.fromkeys(cols))  # de-dup if band == V
+        st.dataframe(visible[cols])
+        st.caption("coverage: 0–100, how much of the |V|² fall-off (1 → 0 across the first lobe) "
+                   "tonight's UV track captures, +25 if it reaches the null.  "
+                   "x = π·ρ·θ/λ (x-range of the track).  null ✓ = the track reaches the first null.")
     else:
-        visible = run.iloc[kept_idx].reset_index(drop=True)
-        st.write(
-            f"Dark window: {dark_hours:.1f} h.  {len(visible)} of the {len(run)} checked stars are "
-            f"observable for at least 3/4 of it."
-        )
+        st.dataframe(visible[display_cols])
 
-        if baselines and len(visible):
-            theta_col = visible[f"Diameter_{band}"].where(
-                visible[f"Diameter_{band}"].notna(), visible["Diameter_V"])
-            scores = score_candidates(
-                tuple(visible['RA_decimal'].astype(float)),
-                tuple(visible['Dec_decimal'].astype(float)),
-                tuple(theta_col.astype(float)),
-                float(lat_dec1), float(lon_dec1), float(height1),
-                date_str, float(min_altitude_deg),
-                tuple((lbl, tuple(enu)) for lbl, enu in baselines), float(lambda_sel),
-            )
-            visible['coverage'] = [round(s['score']) if s else np.nan for s in scores]
-            visible['x_range'] = [f"{s['x_min']:.1f}–{s['x_max']:.1f}" if s else "" for s in scores]
-            visible['bright%'] = [round(s['frac_bright'] * 100) if s else np.nan for s in scores]
-            visible = visible.sort_values('coverage', ascending=False, na_position='last') \
-                             .reset_index(drop=True)
-            diam_col = f"Diameter_{band}"
-            cols = ['BayerF', 'Common', 'Vmag', diam_col, 'coverage', 'x_range', 'bright%', 'RA', 'Dec']
-            cols = list(dict.fromkeys(cols))  # de-dup if band == V
-            st.dataframe(visible[cols])
-            st.caption("coverage: 0–100, how much of the SNR-weighted first lobe (ρ up to the "
-                       "first null, weighted by |V|² with a 0.2 floor) tonight's UV track spans.  "
-                       "x = π·ρ·θ/λ, first null at 3.83.  bright% = fraction of the night the "
-                       "track is where |V|² ≥ 0.2.")
-        else:
-            st.dataframe(visible[display_cols])
+    st.download_button(
+        "Download list as CSV",
+        data=visible.to_csv(index=False),
+        file_name=f"stars_visible_{date_str}.csv",
+        mime="text/csv",
+    )
 
-        st.download_button(
-            "Download list as CSV",
-            data=visible.to_csv(index=False),
-            file_name=f"stars_visible_{date_str}.csv",
-            mime="text/csv",
-        )
+with st.expander(f"Show the {int(number_of_stars)} brightest stars the search runs through"):
+    st.dataframe(df_display.head(int(number_of_stars)))
 
 
 # ---------------------------------------------------------------------------------------------------------------------------------------
@@ -617,8 +603,9 @@ else:
             rr = np.linspace(0, r_hi, 600)
 
             fig4, axc = plt.subplots(figsize=(9, 4))
-            axc.axhline(V_SNR_FLOOR, ls=":", color="0.55", lw=1, zorder=1)
             axc.axvline(r_null, ls="--", color="0.55", lw=1, zorder=1)
+            axc.annotate("first null", xy=(r_null, 1.0), xytext=(-4, 0), textcoords="offset points",
+                         ha="right", va="top", fontsize=8, color="0.35")
             axc.plot(rr, visibility(rr, diameter_in_rad, lambda_star), "k-", lw=1.6, zorder=2)
             for (lbl, (U, V, W)), c in zip(tracks, TRACK_COLOURS):
                 r_i = np.hypot(U, V)
@@ -630,9 +617,13 @@ else:
             axc.set_ylabel(r"squared visibility  $|V|^2$")
             axc.set_title(f"{selected_star} — {date_str}")
             secx = axc.secondary_xaxis("top", functions=(lambda r: r / k, lambda x: x * k))
-            secx.set_xlabel(r"$x=\pi\rho\theta/\lambda$   ($|V|^2=1$ at 0, first null at 3.83)")
+            secx.set_xlabel(r"$x=\pi\rho\theta/\lambda$  (dimensionless baseline)")
             axc.grid(True, alpha=0.3)
             st.pyplot(fig4)
             plt.close(fig4)
-            st.caption(f"Coverage {sc['score']:.0f}/100 — {score_verdict(sc)}  "
-                       f"(dotted: |V|² = 0.2 SNR floor;  dashed: first null).")
+            st.caption(
+                f"Coverage {sc['score']:.0f}/100 — {score_verdict(sc)}.  "
+                f"The first null (dashed) is where $|V|^2$ first reaches 0 — for a uniform disk "
+                f"at ρ = 1.22 λ/θ ({r_null:.0f} m here), i.e. x = 3.83, the first zero of the "
+                f"Bessel function $J_1$. Sweeping the curve down to it pins θ hardest."
+            )
