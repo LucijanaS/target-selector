@@ -193,13 +193,15 @@ def search_visible_stars(ra_hours, dec_deg, lat, lon, height_m, date_str,
     return kept, dark_hours
 
 
-@st.cache_data(show_spinner="Scoring UV coverage…")
-def score_candidates(ra_hours, dec_deg, theta_mas, lat, lon, height_m, date_str,
-                     min_altitude_deg, baselines_t, lambda_m):
-    """coverage_score() dict per star, using each star's own observable window and the UV
-    tracks of every array baseline. `baselines_t` is a tuple of (label, (E, N, Up))."""
+@st.cache_data(show_spinner="Tracing UV coverage…")
+def traced_rho_per_star(ra_hours, dec_deg, lat, lon, height_m, date_str,
+                        min_altitude_deg, baselines_t):
+    """Per star: the projected baseline lengths rho = sqrt(U^2+V^2) [m] traced over its own
+    observable window across every array baseline, or None if not observable / no baseline.
+    `baselines_t` is a tuple of (label, (E, N, Up)). Only the astropy-heavy part is cached
+    here; coverage_score() is applied on top, uncached, so scoring tweaks take effect at once."""
     out = []
-    for ra_h, dec_d, th_mas in zip(ra_hours, dec_deg, theta_mas):
+    for ra_h, dec_d in zip(ra_hours, dec_deg):
         tj = find_observable_times(ra_h, dec_d, lat, lon, date_str,
                                    height_m=height_m, min_altitude_deg=min_altitude_deg)
         if len(tj) < 3 or not baselines_t:
@@ -209,8 +211,7 @@ def score_candidates(ra_hours, dec_deg, theta_mas, lat, lon, height_m, date_str,
             np.hypot(*compute_uvw_track(ra_h, dec_d, lat, lon, enu, tj)[:2])
             for _, enu in baselines_t
         ])
-        theta_rad = float(th_mas) / 1000 * np.pi / (3600 * 180)
-        out.append(coverage_score(rho, theta_rad, lambda_m))
+        out.append(tuple(np.round(rho, 3)))
     return out
 
 
@@ -447,14 +448,21 @@ else:
     if baselines and len(visible):
         theta_col = visible[f"Diameter_{band}"].where(
             visible[f"Diameter_{band}"].notna(), visible["Diameter_V"])
-        scores = score_candidates(
+        rhos = traced_rho_per_star(
             tuple(visible['RA_decimal'].astype(float)),
             tuple(visible['Dec_decimal'].astype(float)),
-            tuple(theta_col.astype(float)),
             float(lat_dec1), float(lon_dec1), float(height1),
             date_str, float(min_altitude_deg),
-            tuple((lbl, tuple(enu)) for lbl, enu in baselines), float(lambda_sel),
+            tuple((lbl, tuple(enu)) for lbl, enu in baselines),
         )
+        scores = []
+        for r, th_mas in zip(rhos, theta_col):
+            th_mas = float(th_mas)
+            if r is None or not np.isfinite(th_mas) or th_mas <= 0:
+                scores.append(None)
+            else:
+                th_rad = th_mas / 1000 * np.pi / (3600 * 180)
+                scores.append(coverage_score(np.asarray(r), th_rad, lambda_sel))
         visible['coverage'] = [round(s['score']) if s else np.nan for s in scores]
         visible['lobe%'] = [round(s['lobe_frac'] * 100) if s else np.nan for s in scores]
         visible['x_range'] = [f"{s['x_min']:.1f}–{s['x_max']:.1f}" if s else "" for s in scores]
