@@ -70,40 +70,41 @@ def site_utc_offset(lat, lon, date):
 
 # ---------------------------------------------------------------------------------------------------------------------------------------
 # UV-coverage quality -- being above the horizon is necessary but not sufficient. To pin the
-# angular diameter you want the night's UV track to sweep a big swing in |V|^2: from as bright
-# as the array's shortest baseline allows, down toward (and ideally reaching) the first null,
-# where |V|^2 = 0. The score is the fall-off captured -- |V|^2 at the shortest projected
-# baseline minus |V|^2 at the longest (clipped at the null) -- plus a bonus for reaching the
-# null. It's ~0 for a track stuck on the flat top and for one entirely past the null.
-# Geometry only -- no detailed photon-noise model.
+# angular diameter you want the night's UV track to sweep the *first lobe* of the visibility
+# curve, between zero baseline (|V|^2 = 1) and the first null (|V|^2 = 0), starting from as
+# bright as the array's shortest baseline allows. The score is the fall-off captured within
+# the lobe -- |V|^2 at the shortest projected baseline minus |V|^2 at the longest (clipped at
+# the null) -- mildly reduced if much of the track sits past the null (wasted integration).
+# Reaching the null is not itself rewarded. Geometry only -- no detailed photon-noise model.
 # ---------------------------------------------------------------------------------------------------------------------------------------
 
 X_FIRST_NULL = 3.8317059    # first zero of J1 -> |V|^2 = 0  (baseline rho = 1.22 * lambda / theta)
 
 
 def coverage_score(rho_m, theta_rad, lambda_m):
-    """0-100: how much of the visibility fall-off (|V|^2 from 1 at rho=0 to 0 at the first null)
-    tonight's track captures -- |V|^2 at the shortest projected baseline minus |V|^2 at the
-    longest, clipped at the null -- plus 25 for the track actually reaching the null."""
+    """0-100: how much of the first-lobe visibility fall-off (|V|^2 from 1 at rho=0 to 0 at the
+    first null) tonight's track captures -- |V|^2 at the shortest projected baseline minus
+    |V|^2 at the longest, clipped at the null -- times a mild factor for how much of the track
+    stays inside the lobe rather than past the null."""
     rho_m = np.asarray(rho_m, dtype=float)
     rho_m = rho_m[np.isfinite(rho_m) & (rho_m > 0)]
     if rho_m.size == 0 or not np.isfinite(theta_rad) or theta_rad <= 0:
-        return dict(score=0.0, x_min=0.0, x_max=0.0, rho_max=0.0, reached_null=False)
+        return dict(score=0.0, x_min=0.0, x_max=0.0, rho_max=0.0, lobe_frac=0.0)
 
     x = np.pi * rho_m * theta_rad / lambda_m
     x_min, x_max = float(x.min()), float(x.max())
-    reached_null = bool(x_max >= 0.95 * X_FIRST_NULL)
+    lobe_frac = float(max(0.0, min(x_max, X_FIRST_NULL) - min(x_min, X_FIRST_NULL)) / X_FIRST_NULL)
 
     if x_min > X_FIRST_NULL:                       # whole track past the null -> nothing useful
-        return dict(score=0.0, x_min=x_min, x_max=x_max, rho_max=float(rho_m.max()),
-                    reached_null=reached_null)
+        return dict(score=0.0, x_min=x_min, x_max=x_max, rho_max=float(rho_m.max()), lobe_frac=0.0)
 
     v_lo = float(visibility(x_min, 1.0, np.pi))                      # brightest point (short baseline)
-    v_hi = float(visibility(min(x_max, X_FIRST_NULL), 1.0, np.pi))   # faintest useful point
+    v_hi = float(visibility(min(x_max, X_FIRST_NULL), 1.0, np.pi))   # faintest point inside the lobe
     drop = float(np.clip(v_lo - v_hi, 0.0, 1.0))
-    score = 100.0 * float(np.clip(drop + 0.25 * reached_null, 0.0, 1.0))
+    inside = float(np.mean(x <= X_FIRST_NULL))                       # fraction of the night inside the lobe
+    score = 100.0 * float(np.clip(drop * (0.7 + 0.3 * inside), 0.0, 1.0))
     return dict(score=score, x_min=x_min, x_max=x_max, rho_max=float(rho_m.max()),
-                reached_null=reached_null)
+                lobe_frac=lobe_frac)
 
 
 def score_verdict(d):
@@ -112,10 +113,9 @@ def score_verdict(d):
     if d["x_max"] < 0.7:
         return "star barely resolved — the track stays on the flat top of the curve"
     if d["score"] >= 75:
-        return ("track sweeps a big swing in |V|²" +
-                (" and reaches the null — excellent for θ" if d["reached_null"] else " — good for θ"))
+        return "track sweeps most of the first lobe from the bright side — excellent for θ"
     if d["score"] >= 40:
-        return "track captures part of the visibility fall-off"
+        return "track captures part of the first-lobe fall-off"
     return "track captures only a small part of the fall-off — weak θ leverage"
 
 
@@ -456,17 +456,18 @@ else:
             tuple((lbl, tuple(enu)) for lbl, enu in baselines), float(lambda_sel),
         )
         visible['coverage'] = [round(s['score']) if s else np.nan for s in scores]
+        visible['lobe%'] = [round(s['lobe_frac'] * 100) if s else np.nan for s in scores]
         visible['x_range'] = [f"{s['x_min']:.1f}–{s['x_max']:.1f}" if s else "" for s in scores]
-        visible['null'] = ['✓' if s and s['reached_null'] else '' for s in scores]
         visible = visible.sort_values('coverage', ascending=False, na_position='last') \
                          .reset_index(drop=True)
         diam_col = f"Diameter_{band}"
-        cols = ['BayerF', 'Common', 'Vmag', diam_col, 'coverage', 'x_range', 'null', 'RA', 'Dec']
+        cols = ['BayerF', 'Common', 'Vmag', diam_col, 'coverage', 'lobe%', 'x_range', 'RA', 'Dec']
         cols = list(dict.fromkeys(cols))  # de-dup if band == V
         st.dataframe(visible[cols])
-        st.caption("coverage: 0–100, how much of the |V|² fall-off (1 → 0 across the first lobe) "
-                   "tonight's UV track captures, +25 if it reaches the null.  "
-                   "x = π·ρ·θ/λ (x-range of the track).  null ✓ = the track reaches the first null.")
+        st.caption("coverage: 0–100, how much of the first-lobe |V|² fall-off (1 → 0, between "
+                   "zero baseline and the first null) tonight's UV track captures.  "
+                   "lobe% = fraction of the first lobe the track's baseline range spans.  "
+                   "x = π·ρ·θ/λ.")
     else:
         st.dataframe(visible[display_cols])
 
@@ -616,14 +617,12 @@ else:
             axc.set_xlabel(r"projected baseline  $\rho=\sqrt{U^2+V^2}$  [m]")
             axc.set_ylabel(r"squared visibility  $|V|^2$")
             axc.set_title(f"{selected_star} — {date_str}")
-            secx = axc.secondary_xaxis("top", functions=(lambda r: r / k, lambda x: x * k))
-            secx.set_xlabel(r"$x=\pi\rho\theta/\lambda$  (dimensionless baseline)")
             axc.grid(True, alpha=0.3)
             st.pyplot(fig4)
             plt.close(fig4)
             st.caption(
                 f"Coverage {sc['score']:.0f}/100 — {score_verdict(sc)}.  "
                 f"The first null (dashed) is where $|V|^2$ first reaches 0 — for a uniform disk "
-                f"at ρ = 1.22 λ/θ ({r_null:.0f} m here), i.e. x = 3.83, the first zero of the "
-                f"Bessel function $J_1$. Sweeping the curve down to it pins θ hardest."
+                f"at ρ = 1.22 λ/θ ({r_null:.0f} m here). The best θ measurement sweeps the curve "
+                f"between there and zero baseline; going past the null adds little."
             )
