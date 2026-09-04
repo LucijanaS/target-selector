@@ -82,56 +82,63 @@ _c2pu = [
 
 custom = "Custom (enter manually)"
 
-# `dish_m` is the light-collector diameter [m], used only for the rough SII integration-time
-# estimate (collecting area ~ pi (dish_m/2)^2).
+# Fields used only by the rough SII integration-time estimate:
+#   dish_m      light-collector diameter [m]; collecting area ~ pi (dish_m/2)^2. Every dish
+#               in a given array is assumed identical (true for all real presets below --
+#               the one exception is H.E.S.S., where CT5 is 28 m vs CT1-4 ~12 m).
+#   delta_t_ns  detector time resolution ~ 1/(electronic bandwidth) [ns]. Set only where a
+#               value is published; otherwise None -> the sidebar default is used.
 telescope_presets = {
     custom: dict(
-        dishes=None, dish_m=None, approx=False,
+        dishes=None, dish_m=None, delta_t_ns=None, approx=False,
         note="Enter site coordinates and baseline by hand, as before.",
     ),
 
     "MAGIC (La Palma)": dict(
-        dishes=_magic, dish_m=17.0, approx=False,
-        note="MAGIC-1 ↔ MAGIC-2, Roque de los Muchachos.",
+        dishes=_magic, dish_m=17.0, delta_t_ns=2.2, approx=False,
+        note="MAGIC-1 ↔ MAGIC-2, Roque de los Muchachos. δt from Acciari et al. 2024 "
+             "(measured correlation-peak width).",
     ),
 
     "VERITAS (Whipple, Arizona)": dict(
-        dishes=_veritas, dish_m=12.0, approx=False,
-        note="4 telescopes → 6 baselines, Fred Lawrence Whipple Observatory.",
+        dishes=_veritas, dish_m=12.0, delta_t_ns=4.0, approx=False,
+        note="4 telescopes → 6 baselines, Fred Lawrence Whipple Observatory. δt from "
+             "Abeysekara et al. 2020 (system time response).",
     ),
 
     "CTAO-South LSTs (Paranal, Chile)": dict(
-        dishes=_cta_south_lsts, dish_m=23.0, approx=False,
-        note="4 LSTs → 6 baselines, near Cerro Paranal.",
+        dishes=_cta_south_lsts, dish_m=23.0, delta_t_ns=None, approx=False,
+        note="4 LSTs → 6 baselines, near Cerro Paranal. No published SII δt yet.",
     ),
 
     "C2PU – Épsilon/Omicron (Calern)": dict(
-        dishes=_c2pu, dish_m=1.0, approx=False,
+        dishes=_c2pu, dish_m=1.0, delta_t_ns=None, approx=False,
         note="Épsilon ↔ Omicron 1 m telescopes on the Plateau de Calern.",
     ),
 
     "H.E.S.S. (Khomas, Namibia)": dict(
-        dishes=None, dish_m=12.0, site_lat=-23.2717, site_lon=16.5028, site_height_m=1800.0,
-        approx=True,
-        note="Placeholder site centre — enter a CT pair (~120 m) manually for now.",
+        dishes=None, dish_m=12.0, delta_t_ns=None,
+        site_lat=-23.2717, site_lon=16.5028, site_height_m=1800.0, approx=True,
+        note="Placeholder site centre — enter a CT pair (~120 m) manually. dish_m is the "
+             "CT1-4 value; CT5 is 28 m (heterogeneous — not modelled).",
     ),
 
     "CTAO-North LSTs (La Palma)": dict(
-        dishes=None, dish_m=23.0, site_lat=28.7616, site_lon=-17.8906, site_height_m=2200.0,
-        approx=True,
+        dishes=None, dish_m=23.0, delta_t_ns=None,
+        site_lat=28.7616, site_lon=-17.8906, site_height_m=2200.0, approx=True,
         note="Placeholder site centre — enter an LST pair baseline manually for now.",
     ),
 
     "Narrabri NSII (Paul Wild Obs., Australia)": dict(
-        dishes=None, dish_m=6.5, site_lat=-30.3128, site_lon=149.5501, site_height_m=217.0,
-        approx=True,
+        dishes=None, dish_m=6.5, delta_t_ns=10.0,
+        site_lat=-30.3128, site_lon=149.5501, site_height_m=217.0, approx=True,
         note="Hanbury Brown & Twiss 1963–74. Two 6.5 m reflectors on a 188 m circular rail — "
-             "baseline continuously variable 0–188 m; enter the value you want.",
+             "baseline 0–188 m; enter the value you want. δt ~10 ns (1970s ~60 MHz correlator).",
     ),
 
     "StarBase Utah (Grantsville)": dict(
-        dishes=None, dish_m=3.0, site_lat=40.6939, site_lon=-112.4611, site_height_m=1310.0,
-        approx=True,
+        dishes=None, dish_m=3.0, delta_t_ns=None,
+        site_lat=40.6939, site_lon=-112.4611, site_height_m=1310.0, approx=True,
         note="Placeholder site centre — University of Utah SII testbed, two 3 m dishes ~23 m "
              "apart. Enter the baseline manually.",
     ),

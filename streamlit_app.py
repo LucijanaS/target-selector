@@ -451,15 +451,21 @@ show_map = st.sidebar.checkbox(
 
 with st.sidebar.expander("SNR / integration-time model"):
     _default_dish = preset.get("dish_m")
+    _preset_dt = preset.get("delta_t_ns")
     dish_m = st.number_input(
         "Light-collector diameter [m]:",
         value=float(_default_dish) if _default_dish else 10.0, min_value=0.1, format="%.1f",
-        help="One telescope's mirror diameter. Prefilled from the preset.",
+        help="One telescope's mirror diameter. Prefilled from the preset. All dishes in an "
+             "array are assumed identical.",
     )
     delta_t_ns = st.number_input(
-        "Detector time resolution [ns]:", value=3.0, min_value=0.05, format="%.2f",
-        help="≈ 1/(electronic bandwidth). MAGIC ~2.2 ns, VERITAS ~4 ns.",
+        "Detector time resolution [ns]:",
+        value=float(_preset_dt) if _preset_dt else 3.0, min_value=0.05, format="%.2f",
+        help="≈ 1/(electronic bandwidth). Prefilled from the preset where a value is "
+             "published (MAGIC 2.2, VERITAS 4.0, Narrabri ~10); otherwise a 3 ns default.",
     )
+    if _preset_dt:
+        st.caption(f"δt = {_preset_dt:.1f} ns from the preset.")
     snr_efficiency = st.number_input(
         "Lumped SNR efficiency:", value=0.002, min_value=1e-5, max_value=1.0, format="%.4f",
         help="Fudge factor on the idealised Rai/Basak/Saha SNR, calibrated so a large IACT "
