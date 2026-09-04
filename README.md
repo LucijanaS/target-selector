@@ -9,12 +9,15 @@ Given a location (typed in, or chosen from a telescope-coupling preset) and a da
   most of that night's real dark window (sunset/sunrise computed for the site, not a fixed
   clock window). With a telescope array selected, each star gets a **UV-coverage score**
   (0–100) — how much of the first lobe of its visibility curve (|V|² from 1 at zero baseline
-  to 0 at the first null, ρ = 1.22 λ/θ) tonight's UV track sweeps — and a **rough
-  integration time** for that measurement from the Rai, Basak & Saha (2021) SII noise model
-  — a well-covered but faint star can need weeks of dark time (SII SNR ∝ Φ, so time ∝ Φ⁻² ≈
-  10^(0.8·mag)). Dish size and detector time resolution come from the preset; the total
-  detector×optical **efficiency** is the one input (MAGIC ≈0.09, VERITAS ≈0.15 prefilled,
-  0.10 default). It's the idealised shot-noise limit — real campaigns run longer.
+  to 0 at the first null, ρ = 1.22 λ/θ) tonight's UV track sweeps — and an **integration
+  time** for a 5σ detection from the Hanbury Brown / Rai-Basak-Saha (2021) SII noise model,
+  `SNR_i ∝ √(AᵢAⱼ)·Φ·eff·|V(ρᵢ)|²·√(b_v·t)`, evaluated with the real |V|² along each
+  baseline's traced track (so an over-resolved star — baselines past the null — is slow even
+  at high coverage) and Fisher-combined over the array. Inputs: dish size, effective
+  correlation bandwidth `b_v` (MAGIC ≈ 110 MHz), and detector×optical `efficiency`
+  (MAGIC ≈ 0.09, VERITAS ≈ 0.15). Validated against `siicheduler`'s full MAGIC model to
+  ~1.5× for a bright star; the sub-2× instrumental-noise terms (excess noise, polarization,
+  electronics, filter shape) are omitted, so it stays mildly optimistic.
 - for a single selected star, plots its sky track, its uniform-disk visibility map with the
   UV tracks of every array baseline, and the **1-D visibility curve** |V|²(ρ) with the
   traced points marked on it, the coverage score and the estimated integration time.

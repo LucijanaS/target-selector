@@ -110,28 +110,30 @@ def coverage_score(rho_m, theta_rad, lambda_m):
 
 # ---------------------------------------------------------------------------------------------------------------------------------------
 # Feasibility -- coverage says nothing about how long you'd have to integrate. SII SNR per
-# baseline is (Rai, Basak & Saha 2021, eqns 27-28):
-#     SNR_i(t) = sqrt(A_i A_j) * Phi * eff * |V(rho_i)|^2 * sqrt(t / dt)
-# -- it scales with the *squared visibility at that baseline*, so a baseline sitting past the
-# first null (|V|^2 ~ 0.01) is far slower than the coverage score's fall-off would suggest.
-# |V|^2 is evaluated on each baseline's real traced track. Combining the array's baselines and
-# the night's samples is a Fisher sum, SNR^2 = (t/dt) * (Phi eff)^2 * sum_baselines [ A_i A_j *
-# <|V|^4> ], so to reach SNR = S:
-#     t = dt * S^2 / ( (Phi eff)^2 * sum_baselines [ A_i A_j * mean(|V|^4) ] ).
-# Only the dominant photon-noise term is kept -- no PMT excess-noise / polarization /
-# background factors -- so it's still an optimistic (idealised) estimate; `eff` and `dt` are
-# the knobs. Phi is the catalogue's Phi_band (~10% of RBS eq. 28 for Johnson V).
+# baseline is (Hanbury Brown; Rai, Basak & Saha 2021, eqns 27-28):
+#     SNR_i(t) = sqrt(A_i A_j) * Phi * eff * |V(rho_i)|^2 * sqrt(b_v * t)
+# with A the dish area, Phi the spectral photon flux density [s^-1 m^-2 Hz^-1] (the catalogue's
+# Phi_band), `eff` the detector QE x optical throughput, and b_v the *effective* electrical
+# cross-correlation bandwidth (NOT 1/time-resolution -- MAGIC's is ~110 MHz, siicheduler).
+# It scales with the squared visibility *at that baseline*, so a baseline past the first null
+# (|V|^2 ~ 0.01) is far slower than the coverage fall-off suggests -- |V|^2 is evaluated along
+# each baseline's real traced track. Combining the baselines and the night's samples is a
+# Fisher sum, SNR^2 = b_v * t * (Phi eff)^2 * sum_baselines [ A_i A_j * <|V|^4> ], so:
+#     t = S^2 / ( b_v * (Phi eff)^2 * sum_baselines [ A_i A_j * mean(|V|^4) ] ).
+# Once the right |V|^2 and b_v are used this matches siicheduler's full MAGIC model to ~1.5x
+# for a bright star -- the remaining sub-2x terms (PMT excess noise, polarization, electronic
+# noise, filter shape) are left out, so it stays mildly optimistic; `eff` / `b_v` are the knobs.
 # ---------------------------------------------------------------------------------------------------------------------------------------
 
 def integration_time_s(phi, rho_per_baseline, sqrt_area_products, theta_rad, lambda_m,
-                       efficiency, delta_t_s, snr_target=5.0):
-    """Integration time [s] for an `snr_target`-sigma SII measurement, from Rai/Basak/Saha
-    (2021). `rho_per_baseline` is a list of traced projected-baseline arrays [m] (one per array
-    baseline), `sqrt_area_products` the matching sqrt(A_i A_j) [m^2]. |V|^2 is evaluated along
-    each track, so over-resolved stars (baselines past the first null) correctly cost far more
-    than 'coverage' implies."""
+                       efficiency, bandwidth_hz, snr_target=5.0):
+    """Integration time [s] for an `snr_target`-sigma SII detection (Hanbury Brown / RBS 2021).
+    `rho_per_baseline` is a list of traced projected-baseline arrays [m] (one per array
+    baseline), `sqrt_area_products` the matching sqrt(A_i A_j) [m^2], `bandwidth_hz` the
+    effective correlation bandwidth. |V|^2 is evaluated along each track, so over-resolved
+    stars (baselines past the first null) correctly cost far more than 'coverage' implies."""
     phi_eff = phi * efficiency
-    if phi_eff <= 0 or theta_rad <= 0 or not np.isfinite(theta_rad):
+    if phi_eff <= 0 or bandwidth_hz <= 0 or theta_rad <= 0 or not np.isfinite(theta_rad):
         return float("inf")
     q = 0.0
     for rho, sap in zip(rho_per_baseline, sqrt_area_products):
@@ -143,7 +145,7 @@ def integration_time_s(phi, rho_per_baseline, sqrt_area_products, theta_rad, lam
         q += sap ** 2 * float(np.mean(v2 ** 2))
     if q <= 0:
         return float("inf")
-    return float(delta_t_s * snr_target ** 2 / (phi_eff ** 2 * q))
+    return float(snr_target ** 2 / (bandwidth_hz * phi_eff ** 2 * q))
 
 
 def feasibility_label(hours, night_hours):
@@ -482,31 +484,33 @@ show_map = st.sidebar.checkbox(
 
 with st.sidebar.expander("SNR / integration-time model"):
     _default_dish = preset.get("dish_m")
-    _preset_dt = preset.get("delta_t_ns")
+    _preset_bw = preset.get("bandwidth_mhz")
+    _preset_eff = preset.get("efficiency")
     dish_m = st.number_input(
         "Light-collector diameter [m]:",
         value=float(_default_dish) if _default_dish else 10.0, min_value=0.1, format="%.1f",
         help="One telescope's mirror diameter. Prefilled from the preset. All dishes in an "
-             "array are assumed identical.",
+             "array are assumed identical unless the preset says otherwise.",
     )
-    delta_t_ns = st.number_input(
-        "Detector time resolution [ns]:",
-        value=float(_preset_dt) if _preset_dt else 3.0, min_value=0.05, format="%.2f",
-        help="≈ 1/(electronic bandwidth). Prefilled from the preset where a value is "
-             "published (MAGIC 2.2, VERITAS 4.0, Narrabri ~10); otherwise a 3 ns default.",
+    bandwidth_mhz = st.number_input(
+        "Effective correlation bandwidth [MHz]:",
+        value=float(_preset_bw) if _preset_bw else 150.0, min_value=1.0, format="%.0f",
+        help="The effective electrical cross-correlation bandwidth b_v — NOT 1/(time "
+             "resolution). MAGIC ≈ 110 MHz (siicheduler); modern digital correlators are "
+             "~100–200 MHz. 150 is a generic default.",
     )
-    _preset_eff = preset.get("efficiency")
     efficiency = st.number_input(
-        "Total efficiency (detector × optical):",
+        "Efficiency (detector QE × optics):",
         value=float(_preset_eff) if _preset_eff else 0.10, min_value=1e-4, max_value=1.0,
         format="%.3f",
-        help="PMT quantum efficiency × all optical throughput losses, as in the "
-             "Rai/Basak/Saha 2021 SII noise model. Published: MAGIC ≈0.09 (Acciari et al. "
-             "2024), VERITAS ≈0.15 (Abeysekara et al. 2020); 0.10 is a generic default.",
+        help="PMT quantum efficiency × optical throughput. Published: MAGIC ≈ 0.09 "
+             "(Acciari et al. 2020/2024), VERITAS ≈ 0.15 (Abeysekara et al. 2020); 0.10 "
+             "default. The sub-2× instrumental noise terms (excess noise, polarization, "
+             "electronics, filter shape) are NOT included, so times are ~1.5–2× optimistic.",
     )
-    if _preset_dt or _preset_eff:
+    if _preset_bw or _preset_eff:
         st.caption("From the preset: "
-                   + ", ".join(x for x in (f"δt = {_preset_dt:.1f} ns" if _preset_dt else None,
+                   + ", ".join(x for x in (f"b_v = {_preset_bw:g} MHz" if _preset_bw else None,
                                            f"efficiency = {_preset_eff:g}" if _preset_eff else None)
                                if x) + ".")
     snr_target = st.number_input("Target SNR (σ):", value=5.0, min_value=1.0, format="%.1f")
@@ -594,7 +598,7 @@ else:
             s = coverage_score(np.concatenate(rho_pb), th_rad, lambda_sel)
             scores.append(s)
             t_hours.append(integration_time_s(float(phi), rho_pb, sqrt_area_products, th_rad,
-                                              lambda_sel, efficiency, delta_t_ns * 1e-9,
+                                              lambda_sel, efficiency, bandwidth_mhz * 1e6,
                                               snr_target) / 3600)
         visible['coverage'] = [round(s['score']) if s else np.nan for s in scores]
         visible['lobe%'] = [round(s['lobe_frac'] * 100) if s else np.nan for s in scores]
@@ -769,7 +773,7 @@ else:
 
             t_h = integration_time_s(phi_band, [np.hypot(U, V) for _, (U, V, W) in tracks],
                                      sqrt_area_products, diameter_in_rad, lambda_star,
-                                     efficiency, delta_t_ns * 1e-9, snr_target) / 3600
+                                     efficiency, bandwidth_mhz * 1e6, snr_target) / 3600
             obs_h = len(times_jd) * 5 / 60
             st.caption(
                 f"Coverage {sc['score']:.0f}/100 — {score_verdict(sc)}.  "
@@ -782,10 +786,10 @@ else:
                          if preset_has_dishes(preset) else f"{dish_m:g}")
             st.caption(
                 f"Integration time for a {snr_target:.0f}σ detection "
-                f"(Rai/Basak/Saha 2021; V = {star['Vmag']:.1f}, {len(baselines)} baseline"
+                f"(Hanbury Brown / RBS 2021; V = {star['Vmag']:.1f}, {len(baselines)} baseline"
                 f"{'s' if len(baselines) != 1 else ''}, {_dish_txt} m dishes, "
-                f"efficiency {efficiency:g}, δt {delta_t_ns:g} ns): "
+                f"b_v {bandwidth_mhz:g} MHz, efficiency {efficiency:g}): "
                 f"**{fmt_duration(t_h)}** — {feasibility_label(t_h, obs_h)}.  "
-                f"SNR ∝ |V|² along each baseline's real track, so past the first null it climbs "
-                f"steeply; keeps only the photon-noise term, so still optimistic. Tune in the sidebar."
+                f"SNR ∝ |V|² along each baseline's real track, so it climbs steeply past the "
+                f"first null. Omits the sub-2× instrumental-noise terms, so ~1.5–2× optimistic."
             )
