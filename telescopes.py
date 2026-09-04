@@ -12,10 +12,11 @@ The baseline geometry is *not* re-implemented here -- `pairwise_baselines()` and
 The UV projection itself is `brightstar_functions.compute_uvw_track`.
 
 Dish coordinates for MAGIC, VERITAS and CTAO-South are copied from
-`brightstar/LimbO/telescope_arrays.py`; C2PU from `brightstar/brightstar_input.py`.
-Presets flagged `approx=True` (H.E.S.S., CTAO-North) have only a placeholder site centre
-and no dish list yet -- the app keeps its manual baseline controls for them. Add the real
-dishes to `dishes=[...]` (and drop `site_*` + `approx`) once coordinates are available.
+`brightstar/LimbO/telescope_arrays.py`; C2PU from `brightstar/brightstar_input.py`; H.E.S.S.
+CT3/CT4 and the CTAO-North LSTs were supplied directly. A preset with `movable=True`
+(Narrabri) has a fixed site but a user-set baseline length (`baseline_range`) and
+orientation rather than a dish list. Any remaining `approx=True` preset has only a
+placeholder site centre.
 """
 
 from telescope_coords import parse_lat_lon, enu_baseline, all_pairwise_baselines
@@ -39,6 +40,14 @@ def pairwise_baselines(dishes):
         label = f'{dishes[i]["name"]}–{dishes[j]["name"]}'
         out.append((label, (round(float(x_e), 3), round(float(x_n), 3), round(float(x_up), 3))))
     return out
+
+
+def pairwise_dish_diams(dishes, fallback_dish_m):
+    """[(dm_i, dm_j), ...] light-collector diameters [m] for every dish pair (i < j), in the
+    same order as pairwise_baselines(). Uses each dish's own 'dish_m' when present (mixed
+    arrays like MAGIC + LST-1), else `fallback_dish_m`."""
+    dm = [float(d.get("dish_m") or fallback_dish_m) for d in dishes]
+    return [(dm[i], dm[j]) for i in range(len(dishes)) for j in range(i + 1, len(dishes))]
 
 
 def preset_site(preset):
@@ -79,6 +88,24 @@ _c2pu = [
     dict(name="Épsilon", lat="43.75370", lon="6.92294", height=1776.507),
     dict(name="Omicron", lat="43.75370", lon="6.92312", height=1783.504),
 ]
+# H.E.S.S. CT3 + CT4 (12 m dishes), Khomas Highland.
+_hess = [
+    dict(name="CT3", lat="-23.271541", lon="16.499250", height=1800.0),
+    dict(name="CT4", lat="-23.272336", lon="16.500116", height=1800.0),
+]
+# CTAO-North LST-1..4 (23 m dishes), Roque de los Muchachos, La Palma.
+_lst_north = [
+    dict(name="LST-1", lat="28.761538", lon="-17.891495", height=2200.0),
+    dict(name="LST-2", lat="28.761853", lon="-17.892707", height=2200.0),
+    dict(name="LST-3", lat="28.762863", lon="-17.892546", height=2200.0),
+    dict(name="LST-4", lat="28.762458", lon="-17.891386", height=2200.0),
+]
+# MAGIC-1, MAGIC-2 (17 m) + LST-1 (23 m) -- a mixed array, all at Roque de los Muchachos.
+_magic_lst1 = [
+    dict(name="MAGIC-1", lat=_magic[0]["lat"], lon=_magic[0]["lon"], height=2200.0, dish_m=17.0),
+    dict(name="MAGIC-2", lat=_magic[1]["lat"], lon=_magic[1]["lon"], height=2200.0, dish_m=17.0),
+    dict(name="LST-1", lat=_lst_north[0]["lat"], lon=_lst_north[0]["lon"], height=2200.0, dish_m=23.0),
+]
 
 custom = "Custom (enter manually)"
 
@@ -116,30 +143,28 @@ telescope_presets = {
         note="Épsilon ↔ Omicron 1 m telescopes on the Plateau de Calern.",
     ),
 
-    "H.E.S.S. (Khomas, Namibia)": dict(
-        dishes=None, dish_m=12.0, delta_t_ns=None,
-        site_lat=-23.2717, site_lon=16.5028, site_height_m=1800.0, approx=True,
-        note="Placeholder site centre — enter a CT pair (~120 m) manually. dish_m is the "
-             "CT1-4 value; CT5 is 28 m (heterogeneous — not modelled).",
+    "H.E.S.S. CT3 + CT4 (Khomas, Namibia)": dict(
+        dishes=_hess, dish_m=12.0, delta_t_ns=None, approx=False,
+        note="CT3 ↔ CT4, 12 m dishes. (CT5, 28 m, not included.)",
     ),
 
     "CTAO-North LSTs (La Palma)": dict(
-        dishes=None, dish_m=23.0, delta_t_ns=None,
-        site_lat=28.7616, site_lon=-17.8906, site_height_m=2200.0, approx=True,
-        note="Placeholder site centre — enter an LST pair baseline manually for now.",
+        dishes=_lst_north, dish_m=23.0, delta_t_ns=None, approx=False,
+        note="LST-1..4 → 6 baselines, Roque de los Muchachos. No published SII δt yet.",
+    ),
+
+    "MAGIC ×2 + LST-1 (La Palma)": dict(
+        dishes=_magic_lst1, dish_m=17.0, delta_t_ns=2.2, approx=False,
+        note="MAGIC-1, MAGIC-2 (17 m) and LST-1 (23 m) → 3 baselines. Mixed dish sizes are "
+             "handled per pair.",
     ),
 
     "Narrabri NSII (Paul Wild Obs., Australia)": dict(
         dishes=None, dish_m=6.5, delta_t_ns=10.0,
-        site_lat=-30.3128, site_lon=149.5501, site_height_m=217.0, approx=True,
-        note="Hanbury Brown & Twiss 1963–74. Two 6.5 m reflectors on a 188 m circular rail — "
-             "baseline 0–188 m; enter the value you want. δt ~10 ns (1970s ~60 MHz correlator).",
-    ),
-
-    "StarBase Utah (Grantsville)": dict(
-        dishes=None, dish_m=3.0, delta_t_ns=None,
-        site_lat=40.6939, site_lon=-112.4611, site_height_m=1310.0, approx=True,
-        note="Placeholder site centre — University of Utah SII testbed, two 3 m dishes ~23 m "
-             "apart. Enter the baseline manually.",
+        site_lat=-30.209167, site_lon=149.751111, site_height_m=217.0,
+        movable=True, baseline_range=(10.0, 188.0), approx=False,
+        note="Hanbury Brown & Twiss 1963–74. Two 6.5 m reflectors moved around a central "
+             "point; set the baseline length (10–188 m) and orientation. δt ~10 ns "
+             "(1970s ~60 MHz correlator).",
     ),
 }

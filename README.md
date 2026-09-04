@@ -37,14 +37,13 @@ Companion projects:
 ## Telescope presets
 
 The sidebar "Telescope coupling" menu fills in a site and its dish positions (see
-`telescopes.py`). An N-dish array is plotted with the UV track of **every** dish pair
-(N(N-1)/2 baselines); a multiselect lets you focus on a subset. **MAGIC, VERITAS,
-CTAO-South LSTs and C2PU (Calern)** have real dish coordinates (copied from
-`brightstar/LimbO/telescope_arrays.py` and `brightstar/brightstar_input.py`); the baseline
-maths is `telescope_coords.all_pairwise_baselines`. **H.E.S.S.** and **CTAO-North LSTs**
-still have placeholder site centres and no dish list — enter a baseline by hand for those,
-or add their dishes to `telescopes.py`. Pick **Custom (enter manually)** to type everything
-by hand.
+`telescopes.py`), and an N-dish array is plotted with the UV track of **every** dish pair
+(N(N−1)/2 baselines). Presets: MAGIC, VERITAS, CTAO-South LSTs, CTAO-North LSTs, C2PU
+(Calern), H.E.S.S. CT3+CT4, and **MAGIC ×2 + LST-1** (a mixed 17 m / 23 m array — dish areas
+combined per baseline). **Narrabri NSII** is a movable pair: a fixed site with a
+user-set baseline length (10–188 m) and orientation. The baseline maths is
+`telescope_coords.all_pairwise_baselines`. Pick **Custom (enter manually)** to type
+everything by hand.
 
 ## Run it
 

@@ -21,7 +21,7 @@ from brightstar_functions import (
 )
 from telescopes import (
     telescope_presets, custom, preset_has_dishes, preset_site,
-    pairwise_baselines, latlon_to_enu,
+    pairwise_baselines, pairwise_dish_diams, latlon_to_enu,
 )
 from telescope_coords import parse_lat_lon
 
@@ -120,14 +120,17 @@ def coverage_score(rho_m, theta_rad, lambda_m):
 # star with drop ~ 0.5 in about one night. It's a rough, relative feasibility number.
 # ---------------------------------------------------------------------------------------------------------------------------------------
 
-def integration_time_s(phi, drop, dish_m, n_baselines, snr_efficiency, delta_t_s, snr_target=5.0):
+def integration_time_s(phi, drop, sqrt_area_products, snr_efficiency, delta_t_s, snr_target=5.0):
     """Rough integration time [s] for an `snr_target`-sigma measurement of the visibility
-    fall-off `drop`, with dishes of diameter `dish_m` and `n_baselines` combined."""
-    if phi <= 0 or drop <= 0 or dish_m <= 0 or n_baselines < 1:
+    fall-off `drop`. `sqrt_area_products` is a list of sqrt(A_i * A_j) [m^2], one per combined
+    baseline (equal to a dish's area for a uniform array). Combining N baselines is a Fisher
+    sum: 1/sigma^2 = sum_ij (sqrt(A_i A_j) * Phi_eff)^2 * (t/dt), so
+        t = dt * snr^2 / (drop^2 * Phi_eff^2 * sum_ij A_i A_j)."""
+    sum_area2 = float(np.sum(np.square(sqrt_area_products)))
+    if phi <= 0 or drop <= 0 or sum_area2 <= 0:
         return float("inf")
-    area = np.pi * (dish_m / 2.0) ** 2
     phi_eff = phi * snr_efficiency
-    return float(delta_t_s * (snr_target / (drop * area * phi_eff)) ** 2 / n_baselines)
+    return float(delta_t_s * snr_target ** 2 / (drop ** 2 * phi_eff ** 2 * sum_area2))
 
 
 def feasibility_label(hours, night_hours):
@@ -352,6 +355,19 @@ if preset_has_dishes(preset):
         f"{len(baselines)} baseline{'s' if len(baselines) != 1 else ''} "
         f"({', '.join(lbl for lbl, _ in baselines)})."
     )
+elif preset.get("movable"):
+    # Fixed site, one movable pair -- the user sets the baseline length and orientation.
+    lat_dec1, lon_dec1, height1 = float(site_lat), float(site_lon), float(site_height)
+    _lo, _hi = preset["baseline_range"]
+    b_len = st.sidebar.slider("Baseline length [m]:", float(_lo), float(_hi),
+                              value=float(min(max(_lo, 100.0), _hi)))
+    b_ang = st.sidebar.number_input(
+        "Baseline orientation [deg]:", min_value=0, max_value=359, value=90,
+        help="0° → x_N = baseline, x_E = 0;  90° → x_N = 0, x_E = baseline.",
+    )
+    baselines = [("baseline", (float(np.sin(np.radians(b_ang)) * b_len),
+                               float(np.cos(np.radians(b_ang)) * b_len), 0.0))]
+    st.sidebar.caption(f"Site: {lat_dec1:.4f}°, {lon_dec1:.4f}°, {height1:.0f} m — movable pair.")
 else:
     two_telescopes = st.sidebar.radio(
         "Two telescopes?",
@@ -397,7 +413,8 @@ else:
                 lat_dec2 = st.sidebar.number_input("2nd telescope latitude [deg]:", value=-23.34157, format="%.5f")
                 lon_dec2 = st.sidebar.number_input("2nd telescope longitude [deg]:", value=16.22447, format="%.5f")
     else:
-        # Placeholder-site preset (H.E.S.S. / CTAO-North): site fixed, 2nd telescope manual.
+        # Fallback for any preset that has only a placeholder site centre: site fixed,
+        # second telescope entered manually.
         lat_dec1 = st.sidebar.number_input("Site latitude [deg]:", value=float(site_lat), format="%.5f")
         lon_dec1 = st.sidebar.number_input("Site longitude [deg]:", value=float(site_lon), format="%.5f")
         if two_telescopes == "Yes" and loc_mode == "coordinates":
@@ -473,6 +490,19 @@ with st.sidebar.expander("SNR / integration-time model"):
              "to match your real system.",
     )
     snr_target = st.number_input("Target SNR (σ):", value=5.0, min_value=1.0, format="%.1f")
+    if preset_has_dishes(preset):
+        _diams = sorted({d.get("dish_m") or dish_m for d in preset["dishes"]})
+        if len(_diams) > 1:
+            st.caption("Mixed dishes ({} m) — combined per baseline; the field above is the "
+                       "fallback for dishes without their own size.".format(
+                           ", ".join(f"{d:g}" for d in _diams)))
+
+# sqrt(A_i * A_j) [m^2] per plotted baseline, for the integration-time estimate.
+if preset_has_dishes(preset):
+    sqrt_area_products = [np.pi / 4 * di * dj
+                          for di, dj in pairwise_dish_diams(preset["dishes"], dish_m)]
+else:
+    sqrt_area_products = [np.pi / 4 * dish_m ** 2] * max(len(baselines), 1)
 
 if show_map:
     st.write("Map of the telescope location(s):")
@@ -542,7 +572,7 @@ else:
             th_rad = th_mas / 1000 * np.pi / (3600 * 180)
             s = coverage_score(np.asarray(r), th_rad, lambda_sel)
             scores.append(s)
-            t_hours.append(integration_time_s(float(phi), s['drop'], dish_m, len(baselines),
+            t_hours.append(integration_time_s(float(phi), s['drop'], sqrt_area_products,
                                               snr_efficiency, delta_t_ns * 1e-9, snr_target) / 3600)
         visible['coverage'] = [round(s['score']) if s else np.nan for s in scores]
         visible['lobe%'] = [round(s['lobe_frac'] * 100) if s else np.nan for s in scores]
@@ -713,7 +743,7 @@ else:
             st.pyplot(fig4)
             plt.close(fig4)
 
-            t_h = integration_time_s(phi_band, sc['drop'], dish_m, len(baselines),
+            t_h = integration_time_s(phi_band, sc['drop'], sqrt_area_products,
                                      snr_efficiency, delta_t_ns * 1e-9, snr_target) / 3600
             obs_h = len(times_jd) * 5 / 60
             st.caption(
@@ -722,10 +752,13 @@ else:
                 f"at ρ = 1.22 λ/θ ({r_null:.0f} m here). The best θ measurement sweeps the curve "
                 f"between there and zero baseline; going past the null adds little."
             )
+            _dish_txt = (", ".join(f"{d:g}" for d in sorted({dp for pair in
+                         pairwise_dish_diams(preset["dishes"], dish_m) for dp in pair}))
+                         if preset_has_dishes(preset) else f"{dish_m:g}")
             st.caption(
                 f"Rough integration time for a {snr_target:.0f}σ measurement of this fall-off "
                 f"(V = {star['Vmag']:.1f}, {len(baselines)} baseline"
-                f"{'s' if len(baselines) != 1 else ''}, {dish_m:.0f} m dishes): "
+                f"{'s' if len(baselines) != 1 else ''}, {_dish_txt} m dishes): "
                 f"**{fmt_duration(t_h)}** — {feasibility_label(t_h, obs_h)}.  "
                 f"Scales as Φ⁻² ≈ 10^(0.8·mag), so a fainter star costs sharply more time; "
                 f"tune the model in the sidebar."
