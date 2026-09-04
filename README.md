@@ -10,10 +10,11 @@ Given a location (typed in, or chosen from a telescope-coupling preset) and a da
   clock window). With a telescope array selected, each star gets a **UV-coverage score**
   (0–100) — how much of the first lobe of its visibility curve (|V|² from 1 at zero baseline
   to 0 at the first null, ρ = 1.22 λ/θ) tonight's UV track sweeps — and a **rough
-  integration time** for that measurement, since a well-covered but faint star can need
-  weeks of dark time (SII SNR ∝ Φ, so time ∝ Φ⁻² ≈ 10^(0.8·mag)). The SNR model (dish size,
-  detector time resolution, a lumped efficiency calibrated to a large IACT pair) is tunable
-  in the sidebar.
+  integration time** for that measurement from the Rai, Basak & Saha (2021) SII noise model
+  — a well-covered but faint star can need weeks of dark time (SII SNR ∝ Φ, so time ∝ Φ⁻² ≈
+  10^(0.8·mag)). Dish size and detector time resolution come from the preset; the total
+  detector×optical **efficiency** is the one input (MAGIC ≈0.09, VERITAS ≈0.15 prefilled,
+  0.10 default). It's the idealised shot-noise limit — real campaigns run longer.
 - for a single selected star, plots its sky track, its uniform-disk visibility map with the
   UV tracks of every array baseline, and the **1-D visibility curve** |V|²(ρ) with the
   traced points marked on it, the coverage score and the estimated integration time.

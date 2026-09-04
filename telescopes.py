@@ -109,12 +109,13 @@ _magic_lst1 = [
 
 custom = "Custom (enter manually)"
 
-# Fields used only by the rough SII integration-time estimate:
-#   dish_m      light-collector diameter [m]; collecting area ~ pi (dish_m/2)^2. Every dish
-#               in a given array is assumed identical (true for all real presets below --
-#               the one exception is H.E.S.S., where CT5 is 28 m vs CT1-4 ~12 m).
-#   delta_t_ns  detector time resolution ~ 1/(electronic bandwidth) [ns]. Set only where a
-#               value is published; otherwise None -> the sidebar default is used.
+# Fields used only by the SII integration-time estimate (Rai/Basak/Saha 2021 noise model):
+#   dish_m      light-collector diameter [m]; area ~ pi (dish_m/2)^2. A dish dict may carry
+#               its own dish_m to override this (mixed arrays, e.g. MAGIC x2 + LST-1).
+#   delta_t_ns  detector time resolution ~ 1/(electronic bandwidth) [ns].
+#   efficiency  total detector x optical throughput.
+# delta_t_ns / efficiency are set only where a value is published (MAGIC, VERITAS);
+# otherwise None -> the sidebar defaults are used.
 telescope_presets = {
     custom: dict(
         dishes=None, dish_m=None, delta_t_ns=None, approx=False,
@@ -122,13 +123,13 @@ telescope_presets = {
     ),
 
     "MAGIC (La Palma)": dict(
-        dishes=_magic, dish_m=17.0, delta_t_ns=2.2, approx=False,
+        dishes=_magic, dish_m=17.0, delta_t_ns=2.2, efficiency=0.09, approx=False,
         note="MAGIC-1 ↔ MAGIC-2, Roque de los Muchachos. δt from Acciari et al. 2024 "
              "(measured correlation-peak width).",
     ),
 
     "VERITAS (Whipple, Arizona)": dict(
-        dishes=_veritas, dish_m=12.0, delta_t_ns=4.0, approx=False,
+        dishes=_veritas, dish_m=12.0, delta_t_ns=4.0, efficiency=0.15, approx=False,
         note="4 telescopes → 6 baselines, Fred Lawrence Whipple Observatory. δt from "
              "Abeysekara et al. 2020 (system time response).",
     ),
@@ -154,7 +155,7 @@ telescope_presets = {
     ),
 
     "MAGIC ×2 + LST-1 (La Palma)": dict(
-        dishes=_magic_lst1, dish_m=17.0, delta_t_ns=2.2, approx=False,
+        dishes=_magic_lst1, dish_m=17.0, delta_t_ns=2.2, efficiency=0.09, approx=False,
         note="MAGIC-1, MAGIC-2 (17 m) and LST-1 (23 m) → 3 baselines. Mixed dish sizes are "
              "handled per pair.",
     ),

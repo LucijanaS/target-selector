@@ -109,27 +109,28 @@ def coverage_score(rho_m, theta_rad, lambda_m):
 
 
 # ---------------------------------------------------------------------------------------------------------------------------------------
-# Feasibility -- coverage says nothing about how long you'd have to integrate. For SII the
-# noise on the squared visibility is sigma_g = 1 / (A * Phi_eff * sqrt(t / dt)) (Rai, Basak &
-# Saha 2021, eqns 27-28; A = one dish's area, Phi = spectral photon flux density [s^-1 m^-2
-# Hz^-1] = the catalogue's Phi_band, dt = detector time resolution). To measure the fall-off
-# `drop` at S sigma you need sigma_g = drop / S, so
-#     t = dt * (S / (drop * A * Phi_eff))^2 / N_baselines .
-# The idealised eqn is very optimistic, so Phi_eff = Phi * snr_efficiency with a small lumped
-# snr_efficiency (default ~0.002) calibrated so a large IACT pair reaches 5-sigma on a V ~ 2
-# star with drop ~ 0.5 in about one night. It's a rough, relative feasibility number.
+# Feasibility -- coverage says nothing about how long you'd have to integrate. This uses the
+# standard SII squared-visibility noise model (Rai, Basak & Saha 2021, eqns 27-28; the same
+# one in brightstar/LimbO/noise_model.py):
+#     sigma_g = 1 / (sqrt(A_i A_j) * Phi * eff * sqrt(t / dt))
+# with A the dish area, Phi the spectral photon flux density [s^-1 m^-2 Hz^-1] (the
+# catalogue's Phi_band; ~10% of RBS eq. 28 for Johnson V), `eff` the total detector x optical
+# efficiency, and dt the detector time resolution. Combining the array's baselines is a Fisher
+# sum, 1/sigma^2 = sum_ij (sqrt(A_i A_j) Phi eff)^2 (t/dt), so to reach sigma_g = drop / S:
+#     t = dt * S^2 / (drop^2 * (Phi eff)^2 * sum_ij A_i A_j).
+# eqns 27-28 are the idealised shot-noise limit -- real campaigns run longer; `eff` is the
+# one knob for real-world losses. Nothing here is calibrated or fudged.
 # ---------------------------------------------------------------------------------------------------------------------------------------
 
-def integration_time_s(phi, drop, sqrt_area_products, snr_efficiency, delta_t_s, snr_target=5.0):
-    """Rough integration time [s] for an `snr_target`-sigma measurement of the visibility
-    fall-off `drop`. `sqrt_area_products` is a list of sqrt(A_i * A_j) [m^2], one per combined
-    baseline (equal to a dish's area for a uniform array). Combining N baselines is a Fisher
-    sum: 1/sigma^2 = sum_ij (sqrt(A_i A_j) * Phi_eff)^2 * (t/dt), so
-        t = dt * snr^2 / (drop^2 * Phi_eff^2 * sum_ij A_i A_j)."""
+def integration_time_s(phi, drop, sqrt_area_products, efficiency, delta_t_s, snr_target=5.0):
+    """Integration time [s] for an `snr_target`-sigma measurement of the visibility fall-off
+    `drop`, from the Rai/Basak/Saha (2021) SII noise model. `sqrt_area_products` is a list of
+    sqrt(A_i A_j) [m^2], one per combined baseline (= a dish's area for a uniform array);
+    `efficiency` is the total detector x optical throughput."""
     sum_area2 = float(np.sum(np.square(sqrt_area_products)))
-    if phi <= 0 or drop <= 0 or sum_area2 <= 0:
+    if phi <= 0 or drop <= 0 or efficiency <= 0 or sum_area2 <= 0:
         return float("inf")
-    phi_eff = phi * snr_efficiency
+    phi_eff = phi * efficiency
     return float(delta_t_s * snr_target ** 2 / (drop ** 2 * phi_eff ** 2 * sum_area2))
 
 
@@ -138,6 +139,8 @@ def feasibility_label(hours, night_hours):
     if not np.isfinite(hours):
         return "—"
     nights = hours / max(night_hours, 1e-6)
+    if nights <= 0.15:
+        return "well under a night"
     if nights <= 1:
         return "≈ one night"
     if nights <= 8:
@@ -481,14 +484,20 @@ with st.sidebar.expander("SNR / integration-time model"):
         help="≈ 1/(electronic bandwidth). Prefilled from the preset where a value is "
              "published (MAGIC 2.2, VERITAS 4.0, Narrabri ~10); otherwise a 3 ns default.",
     )
-    if _preset_dt:
-        st.caption(f"δt = {_preset_dt:.1f} ns from the preset.")
-    snr_efficiency = st.number_input(
-        "Lumped SNR efficiency:", value=0.002, min_value=1e-5, max_value=1.0, format="%.4f",
-        help="Fudge factor on the idealised Rai/Basak/Saha SNR, calibrated so a large IACT "
-             "pair reaches 5σ on a V≈2 star (fall-off ≈0.5) in about one night. Raise/lower "
-             "to match your real system.",
+    _preset_eff = preset.get("efficiency")
+    efficiency = st.number_input(
+        "Total efficiency (detector × optical):",
+        value=float(_preset_eff) if _preset_eff else 0.10, min_value=1e-4, max_value=1.0,
+        format="%.3f",
+        help="PMT quantum efficiency × all optical throughput losses, as in the "
+             "Rai/Basak/Saha 2021 SII noise model. Published: MAGIC ≈0.09 (Acciari et al. "
+             "2024), VERITAS ≈0.15 (Abeysekara et al. 2020); 0.10 is a generic default.",
     )
+    if _preset_dt or _preset_eff:
+        st.caption("From the preset: "
+                   + ", ".join(x for x in (f"δt = {_preset_dt:.1f} ns" if _preset_dt else None,
+                                           f"efficiency = {_preset_eff:g}" if _preset_eff else None)
+                               if x) + ".")
     snr_target = st.number_input("Target SNR (σ):", value=5.0, min_value=1.0, format="%.1f")
     if preset_has_dishes(preset):
         _diams = sorted({d.get("dish_m") or dish_m for d in preset["dishes"]})
@@ -573,7 +582,7 @@ else:
             s = coverage_score(np.asarray(r), th_rad, lambda_sel)
             scores.append(s)
             t_hours.append(integration_time_s(float(phi), s['drop'], sqrt_area_products,
-                                              snr_efficiency, delta_t_ns * 1e-9, snr_target) / 3600)
+                                              efficiency, delta_t_ns * 1e-9, snr_target) / 3600)
         visible['coverage'] = [round(s['score']) if s else np.nan for s in scores]
         visible['lobe%'] = [round(s['lobe_frac'] * 100) if s else np.nan for s in scores]
         visible[f't({snr_target:.0f}σ)'] = [fmt_duration(h) for h in t_hours]
@@ -587,9 +596,10 @@ else:
         st.dataframe(visible[cols])
         st.caption("coverage: 0–100, how much of the first-lobe |V|² fall-off (1 → 0, between "
                    "zero baseline and the first null) tonight's UV track captures.  "
-                   f"t({snr_target:.0f}σ): rough integration time for that measurement given the "
-                   "star's Φ, the dish size and the number of baselines (see the SNR expander in "
-                   "the sidebar) — a bright, well-covered star is the target.")
+                   f"t({snr_target:.0f}σ): integration time from the Rai/Basak/Saha 2021 SII "
+                   "noise model (Φ, dish area, δt, efficiency, baselines — see the sidebar "
+                   "expander). It's the idealised shot-noise limit, so real campaigns run "
+                   "longer; a bright, well-covered star is the target.")
     else:
         st.dataframe(visible[display_cols])
 
@@ -744,7 +754,7 @@ else:
             plt.close(fig4)
 
             t_h = integration_time_s(phi_band, sc['drop'], sqrt_area_products,
-                                     snr_efficiency, delta_t_ns * 1e-9, snr_target) / 3600
+                                     efficiency, delta_t_ns * 1e-9, snr_target) / 3600
             obs_h = len(times_jd) * 5 / 60
             st.caption(
                 f"Coverage {sc['score']:.0f}/100 — {score_verdict(sc)}.  "
@@ -756,10 +766,11 @@ else:
                          pairwise_dish_diams(preset["dishes"], dish_m) for dp in pair}))
                          if preset_has_dishes(preset) else f"{dish_m:g}")
             st.caption(
-                f"Rough integration time for a {snr_target:.0f}σ measurement of this fall-off "
-                f"(V = {star['Vmag']:.1f}, {len(baselines)} baseline"
-                f"{'s' if len(baselines) != 1 else ''}, {_dish_txt} m dishes): "
+                f"Integration time for a {snr_target:.0f}σ measurement of this fall-off "
+                f"(Rai/Basak/Saha 2021; V = {star['Vmag']:.1f}, {len(baselines)} baseline"
+                f"{'s' if len(baselines) != 1 else ''}, {_dish_txt} m dishes, "
+                f"efficiency {efficiency:g}, δt {delta_t_ns:g} ns): "
                 f"**{fmt_duration(t_h)}** — {feasibility_label(t_h, obs_h)}.  "
-                f"Scales as Φ⁻² ≈ 10^(0.8·mag), so a fainter star costs sharply more time; "
-                f"tune the model in the sidebar."
+                f"Idealised shot-noise limit (real campaigns run longer); scales as "
+                f"Φ⁻² ≈ 10^(0.8·mag). Tune the model in the sidebar."
             )
