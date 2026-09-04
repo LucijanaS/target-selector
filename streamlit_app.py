@@ -109,29 +109,41 @@ def coverage_score(rho_m, theta_rad, lambda_m):
 
 
 # ---------------------------------------------------------------------------------------------------------------------------------------
-# Feasibility -- coverage says nothing about how long you'd have to integrate. This uses the
-# standard SII squared-visibility noise model (Rai, Basak & Saha 2021, eqns 27-28; the same
-# one in brightstar/LimbO/noise_model.py):
-#     sigma_g = 1 / (sqrt(A_i A_j) * Phi * eff * sqrt(t / dt))
-# with A the dish area, Phi the spectral photon flux density [s^-1 m^-2 Hz^-1] (the
-# catalogue's Phi_band; ~10% of RBS eq. 28 for Johnson V), `eff` the total detector x optical
-# efficiency, and dt the detector time resolution. Combining the array's baselines is a Fisher
-# sum, 1/sigma^2 = sum_ij (sqrt(A_i A_j) Phi eff)^2 (t/dt), so to reach sigma_g = drop / S:
-#     t = dt * S^2 / (drop^2 * (Phi eff)^2 * sum_ij A_i A_j).
-# eqns 27-28 are the idealised shot-noise limit -- real campaigns run longer; `eff` is the
-# one knob for real-world losses. Nothing here is calibrated or fudged.
+# Feasibility -- coverage says nothing about how long you'd have to integrate. SII SNR per
+# baseline is (Rai, Basak & Saha 2021, eqns 27-28):
+#     SNR_i(t) = sqrt(A_i A_j) * Phi * eff * |V(rho_i)|^2 * sqrt(t / dt)
+# -- it scales with the *squared visibility at that baseline*, so a baseline sitting past the
+# first null (|V|^2 ~ 0.01) is far slower than the coverage score's fall-off would suggest.
+# |V|^2 is evaluated on each baseline's real traced track. Combining the array's baselines and
+# the night's samples is a Fisher sum, SNR^2 = (t/dt) * (Phi eff)^2 * sum_baselines [ A_i A_j *
+# <|V|^4> ], so to reach SNR = S:
+#     t = dt * S^2 / ( (Phi eff)^2 * sum_baselines [ A_i A_j * mean(|V|^4) ] ).
+# Only the dominant photon-noise term is kept -- no PMT excess-noise / polarization /
+# background factors -- so it's still an optimistic (idealised) estimate; `eff` and `dt` are
+# the knobs. Phi is the catalogue's Phi_band (~10% of RBS eq. 28 for Johnson V).
 # ---------------------------------------------------------------------------------------------------------------------------------------
 
-def integration_time_s(phi, drop, sqrt_area_products, efficiency, delta_t_s, snr_target=5.0):
-    """Integration time [s] for an `snr_target`-sigma measurement of the visibility fall-off
-    `drop`, from the Rai/Basak/Saha (2021) SII noise model. `sqrt_area_products` is a list of
-    sqrt(A_i A_j) [m^2], one per combined baseline (= a dish's area for a uniform array);
-    `efficiency` is the total detector x optical throughput."""
-    sum_area2 = float(np.sum(np.square(sqrt_area_products)))
-    if phi <= 0 or drop <= 0 or efficiency <= 0 or sum_area2 <= 0:
-        return float("inf")
+def integration_time_s(phi, rho_per_baseline, sqrt_area_products, theta_rad, lambda_m,
+                       efficiency, delta_t_s, snr_target=5.0):
+    """Integration time [s] for an `snr_target`-sigma SII measurement, from Rai/Basak/Saha
+    (2021). `rho_per_baseline` is a list of traced projected-baseline arrays [m] (one per array
+    baseline), `sqrt_area_products` the matching sqrt(A_i A_j) [m^2]. |V|^2 is evaluated along
+    each track, so over-resolved stars (baselines past the first null) correctly cost far more
+    than 'coverage' implies."""
     phi_eff = phi * efficiency
-    return float(delta_t_s * snr_target ** 2 / (drop ** 2 * phi_eff ** 2 * sum_area2))
+    if phi_eff <= 0 or theta_rad <= 0 or not np.isfinite(theta_rad):
+        return float("inf")
+    q = 0.0
+    for rho, sap in zip(rho_per_baseline, sqrt_area_products):
+        rho = np.asarray(rho, dtype=float)
+        rho = rho[np.isfinite(rho) & (rho > 0)]
+        if rho.size == 0:
+            continue
+        v2 = visibility(rho, theta_rad, lambda_m)          # |V(rho)|^2 along this baseline's track
+        q += sap ** 2 * float(np.mean(v2 ** 2))
+    if q <= 0:
+        return float("inf")
+    return float(delta_t_s * snr_target ** 2 / (phi_eff ** 2 * q))
 
 
 def feasibility_label(hours, night_hours):
@@ -252,10 +264,10 @@ def search_visible_stars(ra_hours, dec_deg, lat, lon, height_m, date_str,
 @st.cache_data(show_spinner="Tracing UV coverage…")
 def traced_rho_per_star(ra_hours, dec_deg, lat, lon, height_m, date_str,
                         min_altitude_deg, baselines_t):
-    """Per star: the projected baseline lengths rho = sqrt(U^2+V^2) [m] traced over its own
-    observable window across every array baseline, or None if not observable / no baseline.
-    `baselines_t` is a tuple of (label, (E, N, Up)). Only the astropy-heavy part is cached
-    here; coverage_score() is applied on top, uncached, so scoring tweaks take effect at once."""
+    """Per star: a tuple of per-baseline rho = sqrt(U^2+V^2) [m] tracks over its own observable
+    window (one tuple per array baseline, in `baselines_t` order), or None if not observable /
+    no baseline. `baselines_t` is a tuple of (label, (E, N, Up)). Only the astropy-heavy part
+    is cached here; coverage_score() / integration_time_s() are applied on top, uncached."""
     out = []
     for ra_h, dec_d in zip(ra_hours, dec_deg):
         tj = find_observable_times(ra_h, dec_d, lat, lon, date_str,
@@ -263,11 +275,10 @@ def traced_rho_per_star(ra_hours, dec_deg, lat, lon, height_m, date_str,
         if len(tj) < 3 or not baselines_t:
             out.append(None)
             continue
-        rho = np.concatenate([
-            np.hypot(*compute_uvw_track(ra_h, dec_d, lat, lon, enu, tj)[:2])
+        out.append(tuple(
+            tuple(np.round(np.hypot(*compute_uvw_track(ra_h, dec_d, lat, lon, enu, tj)[:2]), 3))
             for _, enu in baselines_t
-        ])
-        out.append(tuple(np.round(rho, 3)))
+        ))
     return out
 
 
@@ -579,10 +590,12 @@ else:
                 t_hours.append(np.nan)
                 continue
             th_rad = th_mas / 1000 * np.pi / (3600 * 180)
-            s = coverage_score(np.asarray(r), th_rad, lambda_sel)
+            rho_pb = [np.asarray(b, dtype=float) for b in r]
+            s = coverage_score(np.concatenate(rho_pb), th_rad, lambda_sel)
             scores.append(s)
-            t_hours.append(integration_time_s(float(phi), s['drop'], sqrt_area_products,
-                                              efficiency, delta_t_ns * 1e-9, snr_target) / 3600)
+            t_hours.append(integration_time_s(float(phi), rho_pb, sqrt_area_products, th_rad,
+                                              lambda_sel, efficiency, delta_t_ns * 1e-9,
+                                              snr_target) / 3600)
         visible['coverage'] = [round(s['score']) if s else np.nan for s in scores]
         visible['lobe%'] = [round(s['lobe_frac'] * 100) if s else np.nan for s in scores]
         visible[f't({snr_target:.0f}σ)'] = [fmt_duration(h) for h in t_hours]
@@ -597,9 +610,10 @@ else:
         st.caption("coverage: 0–100, how much of the first-lobe |V|² fall-off (1 → 0, between "
                    "zero baseline and the first null) tonight's UV track captures.  "
                    f"t({snr_target:.0f}σ): integration time from the Rai/Basak/Saha 2021 SII "
-                   "noise model (Φ, dish area, δt, efficiency, baselines — see the sidebar "
-                   "expander). It's the idealised shot-noise limit, so real campaigns run "
-                   "longer; a bright, well-covered star is the target.")
+                   "noise model — SNR ∝ |V|² on each baseline's real track, so an over-resolved "
+                   "star (baselines past the null) is slow even at high coverage. Photon-noise "
+                   "term only, so still optimistic; set Φ / dish area / δt / efficiency in the "
+                   "sidebar expander.")
     else:
         st.dataframe(visible[display_cols])
 
@@ -753,7 +767,8 @@ else:
             st.pyplot(fig4)
             plt.close(fig4)
 
-            t_h = integration_time_s(phi_band, sc['drop'], sqrt_area_products,
+            t_h = integration_time_s(phi_band, [np.hypot(U, V) for _, (U, V, W) in tracks],
+                                     sqrt_area_products, diameter_in_rad, lambda_star,
                                      efficiency, delta_t_ns * 1e-9, snr_target) / 3600
             obs_h = len(times_jd) * 5 / 60
             st.caption(
@@ -766,11 +781,11 @@ else:
                          pairwise_dish_diams(preset["dishes"], dish_m) for dp in pair}))
                          if preset_has_dishes(preset) else f"{dish_m:g}")
             st.caption(
-                f"Integration time for a {snr_target:.0f}σ measurement of this fall-off "
+                f"Integration time for a {snr_target:.0f}σ detection "
                 f"(Rai/Basak/Saha 2021; V = {star['Vmag']:.1f}, {len(baselines)} baseline"
                 f"{'s' if len(baselines) != 1 else ''}, {_dish_txt} m dishes, "
                 f"efficiency {efficiency:g}, δt {delta_t_ns:g} ns): "
                 f"**{fmt_duration(t_h)}** — {feasibility_label(t_h, obs_h)}.  "
-                f"Idealised shot-noise limit (real campaigns run longer); scales as "
-                f"Φ⁻² ≈ 10^(0.8·mag). Tune the model in the sidebar."
+                f"SNR ∝ |V|² along each baseline's real track, so past the first null it climbs "
+                f"steeply; keeps only the photon-noise term, so still optimistic. Tune in the sidebar."
             )
