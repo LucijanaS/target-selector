@@ -7,14 +7,16 @@ Given a location (typed in, or chosen from a telescope-coupling preset) and a da
 
 - lists the brightest stars that stay above a minimum altitude while the Sun is down for
   most of that night's real dark window (sunset/sunrise computed for the site, not a fixed
-  clock window). With a telescope array selected, the list is **ranked by a UV-coverage
-  score** (0–100): how much of the SNR-weighted first lobe each star's UV track spans —
-  ideally from a short baseline (bright, |V|² ≈ 1) out toward the first null (x = π·ρ·θ/λ =
-  3.83), with points weighted by |V|² and a floor at 0.2. A star being up is necessary but
-  not sufficient; baseline past the first null is wasted.
+  clock window). With a telescope array selected, each star gets a **UV-coverage score**
+  (0–100) — how much of the first lobe of its visibility curve (|V|² from 1 at zero baseline
+  to 0 at the first null, ρ = 1.22 λ/θ) tonight's UV track sweeps — and a **rough
+  integration time** for that measurement, since a well-covered but faint star can need
+  weeks of dark time (SII SNR ∝ Φ, so time ∝ Φ⁻² ≈ 10^(0.8·mag)). The SNR model (dish size,
+  detector time resolution, a lumped efficiency calibrated to a large IACT pair) is tunable
+  in the sidebar.
 - for a single selected star, plots its sky track, its uniform-disk visibility map with the
   UV tracks of every array baseline, and the **1-D visibility curve** |V|²(ρ) with the
-  traced points marked on it and the coverage score / verdict in the title.
+  traced points marked on it, the coverage score and the estimated integration time.
 
 The star data is the Yale Bright Star Catalogue
 (<http://tdc-www.harvard.edu/catalogs/bsc5.html>), converted to JSON by

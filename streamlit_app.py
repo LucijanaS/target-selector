@@ -89,22 +89,72 @@ def coverage_score(rho_m, theta_rad, lambda_m):
     rho_m = np.asarray(rho_m, dtype=float)
     rho_m = rho_m[np.isfinite(rho_m) & (rho_m > 0)]
     if rho_m.size == 0 or not np.isfinite(theta_rad) or theta_rad <= 0:
-        return dict(score=0.0, x_min=0.0, x_max=0.0, rho_max=0.0, lobe_frac=0.0)
+        return dict(score=0.0, x_min=0.0, x_max=0.0, rho_max=0.0, lobe_frac=0.0, drop=0.0)
 
     x = np.pi * rho_m * theta_rad / lambda_m
     x_min, x_max = float(x.min()), float(x.max())
     lobe_frac = float(max(0.0, min(x_max, x_first_null) - min(x_min, x_first_null)) / x_first_null)
 
     if x_min > x_first_null:                       # whole track past the null -> nothing useful
-        return dict(score=0.0, x_min=x_min, x_max=x_max, rho_max=float(rho_m.max()), lobe_frac=0.0)
+        return dict(score=0.0, x_min=x_min, x_max=x_max, rho_max=float(rho_m.max()),
+                    lobe_frac=0.0, drop=0.0)
 
     v_lo = float(visibility(x_min, 1.0, np.pi))                      # brightest point (short baseline)
     v_hi = float(visibility(min(x_max, x_first_null), 1.0, np.pi))   # faintest point inside the lobe
-    drop = float(np.clip(v_lo - v_hi, 0.0, 1.0))
+    drop = float(np.clip(v_lo - v_hi, 0.0, 1.0))                     # the |V|^2 swing = the signal
     inside = float(np.mean(x <= x_first_null))                       # fraction of the night inside the lobe
     score = 100.0 * float(np.clip(drop * (0.7 + 0.3 * inside), 0.0, 1.0))
     return dict(score=score, x_min=x_min, x_max=x_max, rho_max=float(rho_m.max()),
-                lobe_frac=lobe_frac)
+                lobe_frac=lobe_frac, drop=drop)
+
+
+# ---------------------------------------------------------------------------------------------------------------------------------------
+# Feasibility -- coverage says nothing about how long you'd have to integrate. For SII the
+# noise on the squared visibility is sigma_g = 1 / (A * Phi_eff * sqrt(t / dt)) (Rai, Basak &
+# Saha 2021, eqns 27-28; A = one dish's area, Phi = spectral photon flux density [s^-1 m^-2
+# Hz^-1] = the catalogue's Phi_band, dt = detector time resolution). To measure the fall-off
+# `drop` at S sigma you need sigma_g = drop / S, so
+#     t = dt * (S / (drop * A * Phi_eff))^2 / N_baselines .
+# The idealised eqn is very optimistic, so Phi_eff = Phi * snr_efficiency with a small lumped
+# snr_efficiency (default ~0.002) calibrated so a large IACT pair reaches 5-sigma on a V ~ 2
+# star with drop ~ 0.5 in about one night. It's a rough, relative feasibility number.
+# ---------------------------------------------------------------------------------------------------------------------------------------
+
+def integration_time_s(phi, drop, dish_m, n_baselines, snr_efficiency, delta_t_s, snr_target=5.0):
+    """Rough integration time [s] for an `snr_target`-sigma measurement of the visibility
+    fall-off `drop`, with dishes of diameter `dish_m` and `n_baselines` combined."""
+    if phi <= 0 or drop <= 0 or dish_m <= 0 or n_baselines < 1:
+        return float("inf")
+    area = np.pi * (dish_m / 2.0) ** 2
+    phi_eff = phi * snr_efficiency
+    return float(delta_t_s * (snr_target / (drop * area * phi_eff)) ** 2 / n_baselines)
+
+
+def feasibility_label(hours, night_hours):
+    """Plain-language bucket for an integration time, given usable dark hours per night."""
+    if not np.isfinite(hours):
+        return "—"
+    nights = hours / max(night_hours, 1e-6)
+    if nights <= 1:
+        return "≈ one night"
+    if nights <= 8:
+        return f"≈ {nights:.0f} nights"
+    if nights <= 30:
+        return f"≈ {nights:.0f} nights (weeks)"
+    return "impractical (months+)"
+
+
+def fmt_duration(hours):
+    """Compact string for an integration time in hours."""
+    if not np.isfinite(hours):
+        return "—"
+    if hours < 1 / 60:
+        return f"{hours * 3600:.0f} s"
+    if hours < 1:
+        return f"{hours * 60:.0f} min"
+    if hours < 48:
+        return f"{hours:.1f} h"
+    return f"{hours / 24:.0f} d"
 
 
 def score_verdict(d):
@@ -399,6 +449,25 @@ show_map = st.sidebar.checkbox(
     help="Has no effect on the calculation; only a cross-check of the coordinates you entered.",
 )
 
+with st.sidebar.expander("SNR / integration-time model"):
+    _default_dish = preset.get("dish_m")
+    dish_m = st.number_input(
+        "Light-collector diameter [m]:",
+        value=float(_default_dish) if _default_dish else 10.0, min_value=0.1, format="%.1f",
+        help="One telescope's mirror diameter. Prefilled from the preset.",
+    )
+    delta_t_ns = st.number_input(
+        "Detector time resolution [ns]:", value=3.0, min_value=0.05, format="%.2f",
+        help="≈ 1/(electronic bandwidth). MAGIC ~2.2 ns, VERITAS ~4 ns.",
+    )
+    snr_efficiency = st.number_input(
+        "Lumped SNR efficiency:", value=0.002, min_value=1e-5, max_value=1.0, format="%.4f",
+        help="Fudge factor on the idealised Rai/Basak/Saha SNR, calibrated so a large IACT "
+             "pair reaches 5σ on a V≈2 star (fall-off ≈0.5) in about one night. Raise/lower "
+             "to match your real system.",
+    )
+    snr_target = st.number_input("Target SNR (σ):", value=5.0, min_value=1.0, format="%.1f")
+
 if show_map:
     st.write("Map of the telescope location(s):")
     if preset_has_dishes(preset):
@@ -446,8 +515,10 @@ else:
     )
 
     if baselines and len(visible):
-        theta_col = visible[f"Diameter_{band}"].where(
-            visible[f"Diameter_{band}"].notna(), visible["Diameter_V"])
+        diam_col = f"Diameter_{band}"
+        phi_col_name = f"Phi_{band}"
+        theta_col = visible[diam_col].where(visible[diam_col].notna(), visible["Diameter_V"])
+        phi_col = visible[phi_col_name].where(visible[phi_col_name].notna(), visible["Phi_V"])
         rhos = traced_rho_per_star(
             tuple(visible['RA_decimal'].astype(float)),
             tuple(visible['Dec_decimal'].astype(float)),
@@ -455,27 +526,34 @@ else:
             date_str, float(min_altitude_deg),
             tuple((lbl, tuple(enu)) for lbl, enu in baselines),
         )
-        scores = []
-        for r, th_mas in zip(rhos, theta_col):
+        scores, t_hours = [], []
+        for r, th_mas, phi in zip(rhos, theta_col, phi_col):
             th_mas = float(th_mas)
             if r is None or not np.isfinite(th_mas) or th_mas <= 0:
                 scores.append(None)
-            else:
-                th_rad = th_mas / 1000 * np.pi / (3600 * 180)
-                scores.append(coverage_score(np.asarray(r), th_rad, lambda_sel))
+                t_hours.append(np.nan)
+                continue
+            th_rad = th_mas / 1000 * np.pi / (3600 * 180)
+            s = coverage_score(np.asarray(r), th_rad, lambda_sel)
+            scores.append(s)
+            t_hours.append(integration_time_s(float(phi), s['drop'], dish_m, len(baselines),
+                                              snr_efficiency, delta_t_ns * 1e-9, snr_target) / 3600)
         visible['coverage'] = [round(s['score']) if s else np.nan for s in scores]
         visible['lobe%'] = [round(s['lobe_frac'] * 100) if s else np.nan for s in scores]
+        visible[f't({snr_target:.0f}σ)'] = [fmt_duration(h) for h in t_hours]
+        visible['feasible'] = [feasibility_label(h, dark_hours) for h in t_hours]
         visible['x_range'] = [f"{s['x_min']:.1f}–{s['x_max']:.1f}" if s else "" for s in scores]
         visible = visible.sort_values('coverage', ascending=False, na_position='last') \
                          .reset_index(drop=True)
-        diam_col = f"Diameter_{band}"
-        cols = ['BayerF', 'Common', 'Vmag', diam_col, 'coverage', 'lobe%', 'x_range', 'RA', 'Dec']
+        cols = ['BayerF', 'Common', 'Vmag', diam_col, 'coverage', 'lobe%',
+                f't({snr_target:.0f}σ)', 'feasible', 'x_range', 'RA', 'Dec']
         cols = list(dict.fromkeys(cols))  # de-dup if band == V
         st.dataframe(visible[cols])
         st.caption("coverage: 0–100, how much of the first-lobe |V|² fall-off (1 → 0, between "
                    "zero baseline and the first null) tonight's UV track captures.  "
-                   "lobe% = fraction of the first lobe the track's baseline range spans.  "
-                   "x = π·ρ·θ/λ.")
+                   f"t({snr_target:.0f}σ): rough integration time for that measurement given the "
+                   "star's Φ, the dish size and the number of baselines (see the SNR expander in "
+                   "the sidebar) — a bright, well-covered star is the target.")
     else:
         st.dataframe(visible[display_cols])
 
@@ -628,9 +706,21 @@ else:
             axc.grid(True, alpha=0.3)
             st.pyplot(fig4)
             plt.close(fig4)
+
+            t_h = integration_time_s(phi_band, sc['drop'], dish_m, len(baselines),
+                                     snr_efficiency, delta_t_ns * 1e-9, snr_target) / 3600
+            obs_h = len(times_jd) * 5 / 60
             st.caption(
                 f"Coverage {sc['score']:.0f}/100 — {score_verdict(sc)}.  "
                 f"The first null (dashed) is where $|V|^2$ first reaches 0 — for a uniform disk "
                 f"at ρ = 1.22 λ/θ ({r_null:.0f} m here). The best θ measurement sweeps the curve "
                 f"between there and zero baseline; going past the null adds little."
+            )
+            st.caption(
+                f"Rough integration time for a {snr_target:.0f}σ measurement of this fall-off "
+                f"(V = {star['Vmag']:.1f}, {len(baselines)} baseline"
+                f"{'s' if len(baselines) != 1 else ''}, {dish_m:.0f} m dishes): "
+                f"**{fmt_duration(t_h)}** — {feasibility_label(t_h, obs_h)}.  "
+                f"Scales as Φ⁻² ≈ 10^(0.8·mag), so a fainter star costs sharply more time; "
+                f"tune the model in the sidebar."
             )
