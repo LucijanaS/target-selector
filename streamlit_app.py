@@ -160,32 +160,31 @@ def integration_time_s(phi, rho_per_baseline, area_products, theta_rad, lambda_m
 
 
 def feasibility_label(hours, night_hours):
-    """Plain-language bucket for an integration time, given usable dark hours per night."""
+    """Coarse, deliberately hedged bucket for the photon-noise-floor integration time. It's a
+    lower bound (necessary, not sufficient), so everything is 'a few X', never a precise value."""
     if not np.isfinite(hours):
-        return "—"
+        return "not reachable"
     nights = hours / max(night_hours, 1e-6)
-    if nights <= 0.15:
-        return "well under a night"
     if nights <= 1:
-        return "≈ one night"
-    if nights <= 8:
-        return f"≈ {nights:.0f} nights"
-    if nights <= 30:
-        return f"≈ {nights:.0f} nights (weeks)"
-    return "impractical (months+)"
+        return "within a night"
+    if nights <= 4:
+        return "a few nights"
+    if nights <= 20:
+        return "a week or more"
+    if nights <= 120:
+        return "months"
+    return "impractical"
 
 
 def fmt_duration(hours):
-    """Compact string for an integration time in hours."""
+    """One-significant-figure, prefixed with >= : this is a floor, not a schedule."""
     if not np.isfinite(hours):
         return "—"
-    if hours < 1 / 60:
-        return f"{hours * 3600:.0f} s"
     if hours < 1:
-        return f"{hours * 60:.0f} min"
-    if hours < 48:
-        return f"{hours:.1f} h"
-    return f"{hours / 24:.0f} d"
+        return f"≳ {max(1, round(hours * 60 / 5) * 5):.0f} min"   # nearest 5 min, never < 1 min
+    if hours < 24:
+        return f"≳ {hours:.0f} h"
+    return f"≳ {hours / 24:.0f} d"
 
 
 def score_verdict(d):
@@ -518,11 +517,12 @@ with st.sidebar.expander("SNR / integration-time model"):
         help="PMT quantum efficiency × optical throughput. Published: MAGIC ≈ 0.09 "
              "(Acciari et al. 2020/2024), VERITAS ≈ 0.15 (Abeysekara et al. 2020); 0.10 default.",
     )
-    st.caption("Reported time = time for an Nσ measurement of the star's size. "
-               "Standard SII SNR ∝ (1/√2)·|V|²·ε·Φ·√(A₁A₂)·√(T/√(Δt₁Δt₂)), counting only "
-               "baseline samples inside the first lobe (past the null the size signal is "
-               "tiny and model-dependent). Sky background, spectral channels and the "
-               "PMT excess-noise / electronics / filter factors are left out → ~1.5× optimistic.")
+    st.caption("The reported time is a **rough lower bound** — the photon-noise floor for the "
+               "first-lobe SII signal to reach Nσ: standard SII SNR ∝ "
+               "(1/√2)·|V|²·ε·Φ·√(A₁A₂)·√(T/√(Δt₁Δt₂)), first-lobe samples only, "
+               "no calibration/systematics, sub-2× instrumental factors dropped. A real "
+               "diameter fit needs the curve *shape* and takes longer; treat the number as a "
+               "ranking aid, not a schedule.")
     if _preset_dt or _preset_eff:
         st.caption("From the preset: "
                    + ", ".join(x for x in (f"Δt = {_preset_dt:g} ns" if _preset_dt else None,
@@ -622,22 +622,24 @@ else:
                 delta_t_ns * 1e-9, snr_target) / 3600)
         visible['coverage'] = [round(s['score']) if s else np.nan for s in scores]
         visible['lobe%'] = [round(s['lobe_frac'] * 100) if s else np.nan for s in scores]
-        visible[f't({snr_target:.0f}σ)'] = [fmt_duration(h) for h in t_hours]
-        visible['feasible'] = [feasibility_label(h, dark_hours) for h in t_hours]
+        visible['t (floor)'] = [fmt_duration(h) for h in t_hours]
+        visible['feasibility'] = [feasibility_label(h, dark_hours) for h in t_hours]
         visible['x_range'] = [f"{s['x_min']:.1f}–{s['x_max']:.1f}" if s else "" for s in scores]
         visible = visible.sort_values('coverage', ascending=False, na_position='last') \
                          .reset_index(drop=True)
         cols = ['BayerF', 'Common', mag_col, diam_col, 'coverage', 'lobe%',
-                f't({snr_target:.0f}σ)', 'feasible', 'x_range', 'RA', 'Dec']
+                't (floor)', 'feasibility', 'x_range', 'RA', 'Dec']
         cols = list(dict.fromkeys(cols))
         st.dataframe(visible[cols])
-        st.caption("coverage: 0–100, how much of the first-lobe |V|² fall-off (1 → 0, between "
-                   "zero baseline and the first null) tonight's UV track captures.  "
-                   f"t({snr_target:.0f}σ): time for an {snr_target:.0f}σ size measurement "
-                   "(standard SII noise model, formula in the sidebar). Only samples inside "
-                   "the first lobe count — a track that stays past the first null (however "
-                   "deep the side-lobes) reads ‘impractical’, matching coverage 0. ~1.5× "
-                   "optimistic (sub-2× instrumental terms omitted).")
+        st.caption(
+            "**coverage** (0–100): how much of the first-lobe |V|² fall-off tonight's UV track "
+            "sweeps — the thing that actually constrains the diameter.  "
+            f"**t (floor)** / **feasibility**: a *very rough lower bound* — the time for the "
+            f"first-lobe SII signal to reach {snr_target:.0f}σ over the photon noise "
+            "(σ_g ∝ 1/√T), with the sub-2× instrumental factors and all calibration / "
+            "limb-darkening / systematics left out. A real diameter fit needs points spread "
+            "across the first lobe and clean calibration, so it takes longer — use these "
+            "columns to rank candidates, not to plan an observation.")
     else:
         st.dataframe(visible[display_cols])
 
@@ -811,12 +813,14 @@ else:
                          pairwise_dish_diams(preset["dishes"], dish_m) for dp in pair}))
                          if preset_has_dishes(preset) else f"{dish_m:g}")
             st.caption(
-                f"Time for a {snr_target:.0f}σ size measurement "
-                f"(standard SII noise model; {band_used} = {float(mag_star):.1f}, "
+                f"Rough feasibility: **{feasibility_label(t_h, obs_h)}** "
+                f"(photon-noise floor **{fmt_duration(t_h)}** for the first-lobe signal to "
+                f"reach {snr_target:.0f}σ; {band_used} = {float(mag_star):.1f}, "
                 f"{len(baselines)} baseline{'s' if len(baselines) != 1 else ''}, "
-                f"{_dish_txt} m dishes, Δt {delta_t_ns:g} ns, ε {efficiency:g}): "
-                f"**{fmt_duration(t_h)}** — {feasibility_label(t_h, obs_h)}.  "
-                f"Only first-lobe samples (ρ < {r_null:.0f} m) count: past the null the "
-                f"|V|² signal is tiny and the size info is model-dependent, so a track that "
-                f"never reaches the first lobe reads ‘impractical’. ~1.5× optimistic."
+                f"{_dish_txt} m dishes, Δt {delta_t_ns:g} ns, ε {efficiency:g}).  "
+                f"A **lower bound only** — it counts just the samples inside ρ < {r_null:.0f} m "
+                f"(past the null the |V|² signal is tiny and model-dependent), assumes perfect "
+                f"calibration, and drops the sub-2× instrumental factors. Measuring θ still "
+                f"needs points spread across the first lobe (see the curve above) — a real "
+                f"observation will take longer."
             )
