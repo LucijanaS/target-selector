@@ -493,12 +493,16 @@ with st.sidebar.expander("SNR / integration-time model"):
              "array are assumed identical unless the preset says otherwise.",
     )
     bandwidth_mhz = st.number_input(
-        "Effective correlation bandwidth [MHz]:",
+        "Electronic bandwidth of the correlator b_v [MHz]:",
         value=float(_preset_bw) if _preset_bw else 150.0, min_value=1.0, format="%.0f",
-        help="The effective electrical cross-correlation bandwidth b_v — NOT 1/(time "
-             "resolution). MAGIC ≈ 110 MHz (siicheduler); modern digital correlators are "
-             "~100–200 MHz. 150 is a generic default.",
+        help="How fast the signal chain + digitiser can follow the starlight's intensity "
+             "flicker. It sets the number of independent samples per second, so SNR grows as "
+             "√(b_v · t) — a wider-band correlator measures faster. It is NOT the optical "
+             "filter width (that cancels out of SII) and NOT 1/(a timing jitter). Analog SII "
+             "was ~tens of MHz; modern digital ~100–1000 MHz; MAGIC ≈ 110 MHz. Default 150.",
     )
+    st.caption("b_v: correlator electronic bandwidth (∴ SNR ∝ √(b_v·t)). Not the optical "
+               "filter, not a time resolution.")
     efficiency = st.number_input(
         "Efficiency (detector QE × optics):",
         value=float(_preset_eff) if _preset_eff else 0.10, min_value=1e-4, max_value=1.0,
