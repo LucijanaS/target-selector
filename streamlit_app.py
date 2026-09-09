@@ -112,52 +112,46 @@ def coverage_score(rho_m, theta_rad, lambda_m):
 # Feasibility -- coverage says nothing about how long you'd have to integrate. The standard SII
 # SNR for one baseline (Dravins et al. 2013; Rai, Basak & Saha 2021) is
 #
-#     SNR = (1/sqrt(2)) * |V12|^2 * eff * Phi
-#           * sqrt( A1 A2 / [ (1 + B1/Phi)(1 + B2/Phi) ] )
-#           * sqrt( T / sqrt(dt1 dt2) )  *  sqrt(N_chan)
+#     SNR = (1/sqrt(2)) * |V12|^2 * eff * Phi * sqrt(A1 A2) * sqrt( T / sqrt(dt1 dt2) )
 #
 #   1/sqrt(2)  -- unpolarised light: only same-polarisation photons bunch
 #   |V12|^2    -- squared visibility AT THAT BASELINE (evaluated along the real traced track)
 #   eff        -- detector QE x optical throughput
 #   Phi        -- spectral photon flux density [s^-1 m^-2 Hz^-1] (the catalogue's Phi_band)
-#   A1, A2     -- the two dish areas; B_i = phi_sky_per_m2 * A_i is the night-sky background
+#   A1, A2     -- the two dish areas
 #   dt_i       -- detector time resolution; 1/sqrt(dt1 dt2) is the effective bandwidth
 #                 (MAGIC ~110 MHz -> dt ~ 9 ns; NOT the g^2 correlation-peak width)
-#   N_chan     -- independent spectral channels correlated in parallel (1 for MAGIC)
 #
-# Squaring and Fisher-combining over baselines + the night's time samples, and solving for T:
+# Squaring and Fisher-combining over baselines + the night's time samples, solving for T:
 #
-#     T = 2 S^2 sqrt(dt1 dt2)
-#         / ( eff^2 Phi^2 N_chan * sum_baselines [ A1 A2 / bg * mean(|V|^4) ] )
+#     T = 2 S^2 sqrt(dt1 dt2) / ( eff^2 Phi^2 * sum_baselines [ A1 A2 * mean(|V|^4) ] )
 #
-# The PMT excess-noise / electronic-noise / filter-shape factors (each ~0.8) are left out, so
-# it stays ~1.5x optimistic vs a full instrument model (e.g. siicheduler). Knobs: eff, dt,
-# N_chan, sky background.
+# Sky background, spectral channels, and the PMT excess-noise / electronic-noise / filter-shape
+# factors (each ~0.8) are left out, so it stays ~1.5x optimistic vs a full instrument model
+# (e.g. siicheduler). Knobs: eff, dt.
 # ---------------------------------------------------------------------------------------------------------------------------------------
 
-def integration_time_s(phi, rho_per_baseline, area_pairs, theta_rad, lambda_m,
-                       efficiency, delta_t_s, snr_target=5.0, n_chan=1, phi_sky_per_m2=0.0):
+def integration_time_s(phi, rho_per_baseline, area_products, theta_rad, lambda_m,
+                       efficiency, delta_t_s, snr_target=5.0):
     """5sigma-detection time [s] from the standard SII SNR (see the block comment above).
     `rho_per_baseline` is a list of traced projected-baseline arrays [m] (one per array
-    baseline); `area_pairs` the matching (A_i, A_j) dish areas [m^2]. |V|^2 is evaluated along
-    each track, so over-resolved stars (baselines past the first null) cost far more than
+    baseline); `area_products` the matching A_i * A_j [m^4]. |V|^2 is evaluated along each
+    track, so over-resolved stars (baselines past the first null) cost far more than
     'coverage' implies."""
     if (phi <= 0 or efficiency <= 0 or delta_t_s <= 0 or theta_rad <= 0
             or not np.isfinite(theta_rad)):
         return float("inf")
     q = 0.0
-    for rho, (a1, a2) in zip(rho_per_baseline, area_pairs):
+    for rho, a1a2 in zip(rho_per_baseline, area_products):
         rho = np.asarray(rho, dtype=float)
         rho = rho[np.isfinite(rho) & (rho > 0)]
         if rho.size == 0:
             continue
         v2 = visibility(rho, theta_rad, lambda_m)          # |V(rho)|^2 along this baseline's track
-        bg = (1.0 + phi_sky_per_m2 * a1 / phi) * (1.0 + phi_sky_per_m2 * a2 / phi)
-        q += (a1 * a2 / bg) * float(np.mean(v2 ** 2))
+        q += a1a2 * float(np.mean(v2 ** 2))
     if q <= 0:
         return float("inf")
-    return float(2.0 * snr_target ** 2 * delta_t_s
-                 / (efficiency ** 2 * phi ** 2 * max(n_chan, 1) * q))
+    return float(2.0 * snr_target ** 2 * delta_t_s / (efficiency ** 2 * phi ** 2 * q))
 
 
 def feasibility_label(hours, night_hours):
@@ -495,9 +489,6 @@ show_map = st.sidebar.checkbox(
 )
 
 with st.sidebar.expander("SNR / integration-time model"):
-    st.caption(r"$\mathrm{SNR}=\tfrac{1}{\sqrt2}\,|V_{12}|^2\,\varepsilon\,\Phi\,"
-               r"\sqrt{\tfrac{A_1A_2}{(1+B_1/\Phi)(1+B_2/\Phi)}}\,"
-               r"\sqrt{\tfrac{T}{\sqrt{\Delta t_1\Delta t_2}}}\,\sqrt{N_\mathrm{chan}}$")
     _default_dish = preset.get("dish_m")
     _preset_dt = preset.get("delta_t_ns")
     _preset_eff = preset.get("efficiency")
@@ -522,21 +513,9 @@ with st.sidebar.expander("SNR / integration-time model"):
         help="PMT quantum efficiency × optical throughput. Published: MAGIC ≈ 0.09 "
              "(Acciari et al. 2020/2024), VERITAS ≈ 0.15 (Abeysekara et al. 2020); 0.10 default.",
     )
-    n_chan = st.number_input(
-        "Spectral channels N_chan:", value=1, min_value=1, step=1,
-        help="Independent wavelength channels correlated in parallel (√N_chan gain). "
-             "1 for single-band SII like MAGIC.",
-    )
-    phi_sky = st.number_input(
-        "Sky background Φ_sky [ph m⁻² s⁻¹ Hz⁻¹]:",
-        value=0.0, min_value=0.0, format="%.2e",
-        help="Night-sky spectral photon flux density per m² of collector (same units as the "
-             "Φ shown on the visibility map). B_i = Φ_sky · A_i degrades SNR by "
-             "1/√[(1+B₁/Φ)(1+B₂/Φ)]. 0 = ignore (fine for bright stars at a dark site); it "
-             "bites for faint stars, big dishes, or a bright Moon.",
-    )
-    st.caption("The PMT excess-noise / electronic-noise / filter-shape factors (each ≈ 0.8) "
-               "are left out, so times run ~1.5× optimistic vs a full instrument model.")
+    st.caption("Standard SII SNR ∝ (1/√2)·|V|²·ε·Φ·√(A₁A₂)·√(T/√(Δt₁Δt₂)). Sky background, "
+               "spectral channels and the PMT excess-noise / electronics / filter factors are "
+               "left out, so times run ~1.5× optimistic vs a full instrument model.")
     if _preset_dt or _preset_eff:
         st.caption("From the preset: "
                    + ", ".join(x for x in (f"Δt = {_preset_dt:g} ns" if _preset_dt else None,
@@ -550,13 +529,12 @@ with st.sidebar.expander("SNR / integration-time model"):
                        "fallback for dishes without their own size.".format(
                            ", ".join(f"{d:g}" for d in _diams)))
 
-# (A_i, A_j) dish areas [m^2] per plotted baseline, for the integration-time estimate.
+# A_i * A_j [m^4] per plotted baseline, for the integration-time estimate.
 if preset_has_dishes(preset):
-    area_pairs = [(np.pi / 4 * di ** 2, np.pi / 4 * dj ** 2)
-                  for di, dj in pairwise_dish_diams(preset["dishes"], dish_m)]
+    area_products = [(np.pi / 4 * di ** 2) * (np.pi / 4 * dj ** 2)
+                     for di, dj in pairwise_dish_diams(preset["dishes"], dish_m)]
 else:
-    _a = np.pi / 4 * dish_m ** 2
-    area_pairs = [(_a, _a)] * max(len(baselines), 1)
+    area_products = [(np.pi / 4 * dish_m ** 2) ** 2] * max(len(baselines), 1)
 
 if show_map:
     st.write("Map of the telescope location(s):")
@@ -628,8 +606,8 @@ else:
             s = coverage_score(np.concatenate(rho_pb), th_rad, lambda_sel)
             scores.append(s)
             t_hours.append(integration_time_s(
-                float(phi), rho_pb, area_pairs, th_rad, lambda_sel, efficiency,
-                delta_t_ns * 1e-9, snr_target, n_chan=n_chan, phi_sky_per_m2=phi_sky) / 3600)
+                float(phi), rho_pb, area_products, th_rad, lambda_sel, efficiency,
+                delta_t_ns * 1e-9, snr_target) / 3600)
         visible['coverage'] = [round(s['score']) if s else np.nan for s in scores]
         visible['lobe%'] = [round(s['lobe_frac'] * 100) if s else np.nan for s in scores]
         visible[f't({snr_target:.0f}σ)'] = [fmt_duration(h) for h in t_hours]
@@ -801,9 +779,8 @@ else:
             plt.close(fig4)
 
             t_h = integration_time_s(
-                phi_band, [np.hypot(U, V) for _, (U, V, W) in tracks], area_pairs,
-                diameter_in_rad, lambda_star, efficiency, delta_t_ns * 1e-9, snr_target,
-                n_chan=n_chan, phi_sky_per_m2=phi_sky) / 3600
+                phi_band, [np.hypot(U, V) for _, (U, V, W) in tracks], area_products,
+                diameter_in_rad, lambda_star, efficiency, delta_t_ns * 1e-9, snr_target) / 3600
             obs_h = len(times_jd) * 5 / 60
             st.caption(
                 f"Coverage {sc['score']:.0f}/100 — {score_verdict(sc)}.  "
@@ -814,12 +791,11 @@ else:
             _dish_txt = (", ".join(f"{d:g}" for d in sorted({dp for pair in
                          pairwise_dish_diams(preset["dishes"], dish_m) for dp in pair}))
                          if preset_has_dishes(preset) else f"{dish_m:g}")
-            _bg_txt = f", Φ_sky {phi_sky:.1e}" if phi_sky > 0 else ""
             st.caption(
                 f"Integration time for a {snr_target:.0f}σ detection "
                 f"(standard SII formula; V = {star['Vmag']:.1f}, {len(baselines)} baseline"
                 f"{'s' if len(baselines) != 1 else ''}, {_dish_txt} m dishes, "
-                f"Δt {delta_t_ns:g} ns, ε {efficiency:g}, N_chan {int(n_chan)}{_bg_txt}): "
+                f"Δt {delta_t_ns:g} ns, ε {efficiency:g}): "
                 f"**{fmt_duration(t_h)}** — {feasibility_label(t_h, obs_h)}.  "
                 f"|V|² is taken along each baseline's real track, so it climbs steeply past the "
                 f"first null. Omits the sub-2× instrumental-noise terms, so ~1.5× optimistic."
