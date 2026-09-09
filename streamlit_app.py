@@ -556,16 +556,21 @@ if show_map:
 # Stars to run through
 # ---------------------------------------------------------------------------------------------------------------------------------------
 
+mag_col = f"{band}mag"   # Vmag / Bmag / Umag -- follows the observing band
+
 st.markdown("## Candidate stars for the night of " + date_str)
 st.write(
-    "The brightest " + str(int(number_of_stars)) + " stars that stay above " +
+    f"The {band}-brightest " + str(int(number_of_stars)) + " stars that stay above " +
     str(min_altitude_deg) + "° while the Sun is down for at least 3/4 of the night" +
     (", ranked by how much of the first lobe of each star's visibility curve tonight's UV "
      "track sweeps (coverage 0–100)." if baselines else ".") +
     "  The list updates with the sidebar; it stays put while you pick a star below."
 )
 
-run = df_all_stars.head(int(number_of_stars)).reset_index(drop=True)
+# "Brightest N" is by the selected band's magnitude (fall back to V where that band is missing).
+_mag_sort = df_all_stars[mag_col].fillna(df_all_stars["Vmag"])
+run = df_all_stars.assign(_m=_mag_sort).sort_values("_m").head(int(number_of_stars)) \
+                  .drop(columns="_m").reset_index(drop=True)
 
 kept_idx, dark_hours = search_visible_stars(
     tuple(run['RA_decimal'].astype(float)),
@@ -615,9 +620,9 @@ else:
         visible['x_range'] = [f"{s['x_min']:.1f}–{s['x_max']:.1f}" if s else "" for s in scores]
         visible = visible.sort_values('coverage', ascending=False, na_position='last') \
                          .reset_index(drop=True)
-        cols = ['BayerF', 'Common', 'Vmag', diam_col, 'coverage', 'lobe%',
+        cols = ['BayerF', 'Common', mag_col, diam_col, 'coverage', 'lobe%',
                 f't({snr_target:.0f}σ)', 'feasible', 'x_range', 'RA', 'Dec']
-        cols = list(dict.fromkeys(cols))  # de-dup if band == V
+        cols = list(dict.fromkeys(cols))
         st.dataframe(visible[cols])
         st.caption("coverage: 0–100, how much of the first-lobe |V|² fall-off (1 → 0, between "
                    "zero baseline and the first null) tonight's UV track captures.  "
@@ -635,8 +640,10 @@ else:
         mime="text/csv",
     )
 
-with st.expander(f"Show the {int(number_of_stars)} brightest stars the search runs through"):
-    st.dataframe(df_display.head(int(number_of_stars)))
+with st.expander(f"Show the {int(number_of_stars)} {band}-brightest stars the search runs through"):
+    _preview_cols = [c for c in display_cols if c not in ("Umag", "Vmag", "Bmag")]
+    _preview_cols[2:2] = [mag_col]   # put the band's magnitude just after Common
+    st.dataframe(run[_preview_cols])
 
 
 # ---------------------------------------------------------------------------------------------------------------------------------------
@@ -657,11 +664,15 @@ given_dec_decimal = float(star['Dec_decimal'])
 
 diameter_band = star.get(f"Diameter_{band}")
 phi_band = star.get(f"Phi_{band}")
+mag_star = star.get(mag_col)
+band_used = band
 if diameter_band is None or pd.isna(diameter_band):
     st.warning(f"No {band}-band diameter for {selected_star} (missing colour index) — using V band instead.")
     diameter_band = star['Diameter_V']
     phi_band = star['Phi_V']
+    mag_star = star['Vmag']
     lambda_star = lambda_V
+    band_used = "V"
 else:
     lambda_star = lambda_sel
 diameter_band = float(diameter_band)
@@ -793,7 +804,7 @@ else:
                          if preset_has_dishes(preset) else f"{dish_m:g}")
             st.caption(
                 f"Integration time for a {snr_target:.0f}σ detection "
-                f"(standard SII formula; V = {star['Vmag']:.1f}, {len(baselines)} baseline"
+                f"(standard SII formula; {band_used} = {float(mag_star):.1f}, {len(baselines)} baseline"
                 f"{'s' if len(baselines) != 1 else ''}, {_dish_txt} m dishes, "
                 f"Δt {delta_t_ns:g} ns, ε {efficiency:g}): "
                 f"**{fmt_duration(t_h)}** — {feasibility_label(t_h, obs_h)}.  "
