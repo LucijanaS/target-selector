@@ -10,14 +10,14 @@ Given a location (typed in, or chosen from a telescope-coupling preset) and a da
   clock window). With a telescope array selected, each star gets a **UV-coverage score**
   (0–100) — how much of the first lobe of its visibility curve (|V|² from 1 at zero baseline
   to 0 at the first null, ρ = 1.22 λ/θ) tonight's UV track sweeps — and an **integration
-  time** for a 5σ detection from the Hanbury Brown / Rai-Basak-Saha (2021) SII noise model,
-  `SNR_i ∝ √(AᵢAⱼ)·Φ·eff·|V(ρᵢ)|²·√(b_v·t)`, evaluated with the real |V|² along each
-  baseline's traced track (so an over-resolved star — baselines past the null — is slow even
-  at high coverage) and Fisher-combined over the array. Inputs: dish size, effective
-  correlation bandwidth `b_v` (MAGIC ≈ 110 MHz), and detector×optical `efficiency`
-  (MAGIC ≈ 0.09, VERITAS ≈ 0.15). Validated against `siicheduler`'s full MAGIC model to
-  ~1.5× for a bright star; the sub-2× instrumental-noise terms (excess noise, polarization,
-  electronics, filter shape) are omitted, so it stays mildly optimistic.
+  time** for a 5σ detection from the standard SII SNR
+  (`SNR = 2^{-1/2}·|V₁₂|²·ε·Φ·√(A₁A₂/[(1+B₁/Φ)(1+B₂/Φ)])·√(T/√(Δt₁Δt₂))·√N_chan`), evaluated
+  with the real |V|² along each baseline's traced track (so an over-resolved star — baselines
+  past the null — is slow even at high coverage) and Fisher-combined over the array. Inputs
+  (sidebar): dish size, detector time resolution Δt (MAGIC ≈ 9 ns ↔ b_v ≈ 110 MHz), efficiency
+  ε (MAGIC ≈ 0.09, VERITAS ≈ 0.15), spectral channels, sky background. Validated against
+  `siicheduler` to ~1.3×; the sub-2× instrumental-noise terms (PMT excess noise, electronic
+  noise, filter shape) are omitted, so it stays mildly optimistic.
 - for a single selected star, plots its sky track, its uniform-disk visibility map with the
   UV tracks of every array baseline, and the **1-D visibility curve** |V|²(ρ) with the
   traced points marked on it, the coverage score and the estimated integration time.

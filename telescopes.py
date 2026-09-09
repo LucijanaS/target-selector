@@ -112,59 +112,60 @@ custom = "Custom (enter manually)"
 # Fields used only by the SII integration-time estimate (Rai/Basak/Saha 2021 noise model):
 #   dish_m      light-collector diameter [m]; area ~ pi (dish_m/2)^2. A dish dict may carry
 #               its own dish_m to override this (mixed arrays, e.g. MAGIC x2 + LST-1).
-#   bandwidth_mhz  effective cross-correlation electrical bandwidth [MHz] (NOT 1/time-res).
-#   efficiency     detector QE x optical throughput.
-# Set only where a value is published (MAGIC: b_v = 110 MHz, eff ~ 0.09; VERITAS eff ~ 0.15);
+#   delta_t_ns  detector time resolution [ns]; 1/sqrt(dt_i dt_j) is the effective bandwidth
+#               in the SII SNR formula. MAGIC's b_v ~ 110 MHz -> dt ~ 9 ns.
+#   efficiency  detector QE x optical throughput.
+# Set only where a value is published (MAGIC: b_v ~ 110 MHz, eff ~ 0.09; VERITAS eff ~ 0.15);
 # otherwise None -> the sidebar defaults are used.
 telescope_presets = {
     custom: dict(
-        dishes=None, dish_m=None, bandwidth_mhz=None, approx=False,
+        dishes=None, dish_m=None, delta_t_ns=None, approx=False,
         note="Enter site coordinates and baseline by hand, as before.",
     ),
 
     "MAGIC (La Palma)": dict(
-        dishes=_magic, dish_m=17.0, bandwidth_mhz=110.0, efficiency=0.09, approx=False,
-        note="MAGIC-1 ↔ MAGIC-2, Roque de los Muchachos. b_v = 110 MHz and efficiency ≈ 0.09 from the "
+        dishes=_magic, dish_m=17.0, delta_t_ns=9.09, efficiency=0.09, approx=False,
+        note="MAGIC-1 ↔ MAGIC-2, Roque de los Muchachos. Δt ≈ 9 ns (b_v ≈ 110 MHz) and ε ≈ 0.09 from the "
              "siicheduler MAGIC config (Acciari et al. 2020/2024).",
     ),
 
     "VERITAS (Whipple, Arizona)": dict(
-        dishes=_veritas, dish_m=12.0, bandwidth_mhz=None, efficiency=0.15, approx=False,
-        note="4 telescopes → 6 baselines, Fred Lawrence Whipple Observatory. efficiency ≈ 0.15 "
-             "(Abeysekara et al. 2020); no published effective bandwidth.",
+        dishes=_veritas, dish_m=12.0, delta_t_ns=None, efficiency=0.15, approx=False,
+        note="4 telescopes → 6 baselines, Fred Lawrence Whipple Observatory. ε ≈ 0.15 (Abeysekara et al. 2020); "
+             "no published effective bandwidth.",
     ),
 
     "CTAO-South LSTs (Paranal, Chile)": dict(
-        dishes=_cta_south_lsts, dish_m=23.0, bandwidth_mhz=None, approx=False,
+        dishes=_cta_south_lsts, dish_m=23.0, delta_t_ns=None, approx=False,
         note="4 LSTs → 6 baselines, near Cerro Paranal. No published SII bandwidth/efficiency.",
     ),
 
     "C2PU – Épsilon/Omicron (Calern)": dict(
-        dishes=_c2pu, dish_m=1.0, bandwidth_mhz=None, approx=False,
+        dishes=_c2pu, dish_m=1.0, delta_t_ns=None, approx=False,
         note="Épsilon ↔ Omicron 1 m telescopes on the Plateau de Calern.",
     ),
 
     "H.E.S.S. CT3 + CT4 (Khomas, Namibia)": dict(
-        dishes=_hess, dish_m=12.0, bandwidth_mhz=None, approx=False,
+        dishes=_hess, dish_m=12.0, delta_t_ns=None, approx=False,
         note="CT3 ↔ CT4, 12 m dishes. (CT5, 28 m, not included.)",
     ),
 
     "CTAO-North LSTs (La Palma)": dict(
-        dishes=_lst_north, dish_m=23.0, bandwidth_mhz=None, approx=False,
+        dishes=_lst_north, dish_m=23.0, delta_t_ns=None, approx=False,
         note="LST-1..4 → 6 baselines, Roque de los Muchachos. No published SII bandwidth/efficiency.",
     ),
 
     "MAGIC ×2 + LST-1 (La Palma)": dict(
-        dishes=_magic_lst1, dish_m=17.0, bandwidth_mhz=110.0, efficiency=0.09, approx=False,
+        dishes=_magic_lst1, dish_m=17.0, delta_t_ns=9.09, efficiency=0.09, approx=False,
         note="MAGIC-1, MAGIC-2 (17 m) and LST-1 (23 m) → 3 baselines. Mixed dish sizes are "
              "handled per pair.",
     ),
 
     "Narrabri NSII (Paul Wild Obs., Australia)": dict(
-        dishes=None, dish_m=6.5, bandwidth_mhz=60.0,
+        dishes=None, dish_m=6.5, delta_t_ns=16.7,
         site_lat=-30.209167, site_lon=149.751111, site_height_m=217.0,
         movable=True, baseline_range=(10.0, 188.0), approx=False,
         note="Hanbury Brown & Twiss 1963–74. Two 6.5 m reflectors moved around a central "
-             "point; set the baseline length (10–188 m) and orientation. b_v ≈ 60 MHz (1970s correlator).",
+             "point; set the baseline length (10–188 m) and orientation. Δt ≈ 17 ns (b_v ≈ 60 MHz, 1970s correlator).",
     ),
 }
