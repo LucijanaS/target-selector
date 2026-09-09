@@ -80,19 +80,6 @@ def site_utc_offset(lat, lon, date):
 
 x_first_null = 3.8317059    # first zero of J1 -> |V|^2 = 0  (baseline rho = 1.22 * lambda / theta)
 
-# Atmospheric extinction [mag / airmass] per band -- used to down-weight low-altitude samples
-# in the integration-time estimate (a star near the horizon is fainter and slower to measure).
-extinction_mag_per_airmass = {"V": 0.12, "B": 0.25, "U": 0.55}
-
-
-def _airmass_flux_factor(alt_deg, k_mag_per_airmass):
-    """Relative photon flux vs. zenith at altitude `alt_deg`, from band extinction `k`.
-    Kasten & Young (1989) airmass; ~1 near zenith, ~0.3 at 10 deg for k=0.25."""
-    alt = np.clip(np.asarray(alt_deg, dtype=float), 1.0, 90.0)
-    airmass = 1.0 / (np.sin(np.radians(alt))
-                     + 0.50572 * (alt + 6.07995) ** -1.6364)
-    return 10.0 ** (-0.4 * k_mag_per_airmass * (airmass - 1.0))
-
 
 def coverage_score(rho_m, theta_rad, lambda_m):
     """0-100: how much of the first-lobe visibility fall-off (|V|^2 from 1 at rho=0 to 0 at the
@@ -137,47 +124,36 @@ def coverage_score(rho_m, theta_rad, lambda_m):
 # past the first null (x = pi rho theta / lambda > 3.83) are NOT counted: their |V|^2 is tiny
 # and the size information there is model-dependent (limb darkening etc.) -- a track that
 # never reaches the first lobe therefore costs ~forever, matching a coverage score of 0.
-#
-# The signal is accumulated over EVERY 5-min sample of the whole observable window (not just
-# the best moment), each weighted by |V(rho(t))|^4 and by an atmospheric-extinction flux
-# factor f(alt) < 1 (so time the star spends low counts for less). Combining over baselines
-# and the night:
+# Squaring and Fisher-combining first-lobe samples over the baselines and the night:
 #
 #     T = 2 S^2 sqrt(dt1 dt2)
-#         / ( eff^2 Phi^2 * sum_baselines [ A1 A2 * mean_over_night( |V|^4 f^2 [x < 3.83] ) ] )
+#         / ( eff^2 Phi^2 * sum_baselines [ A1 A2 * mean_over_night( |V|^4 * [x < 3.83] ) ] )
 #
-# Low-altitude SII coherence loss, sky background, spectral channels and the sub-2x PMT /
-# electronics / filter factors are left out, so it stays ~1.5x optimistic vs a full model.
+# Sky background, spectral channels and the sub-2x PMT/electronics/filter factors are left
+# out, so it stays ~1.5x optimistic vs a full instrument model (e.g. siicheduler).
 # ---------------------------------------------------------------------------------------------------------------------------------------
 
 def integration_time_s(phi, rho_per_baseline, area_products, theta_rad, lambda_m,
-                       efficiency, delta_t_s, snr_target=5.0, alt_deg=None, ext_k=0.0):
+                       efficiency, delta_t_s, snr_target=5.0):
     """Time [s] for an `snr_target`-sigma SII size measurement (see the block comment).
     `rho_per_baseline` is a list of traced projected-baseline arrays [m] (one per array
-    baseline); `area_products` the matching A_i * A_j [m^4]. `alt_deg` (per time sample,
-    shared across baselines) and `ext_k` [mag/airmass] add the extinction weighting. Only
-    first-lobe samples count, so a star whose baselines all sit past the null costs infinity."""
+    baseline); `area_products` the matching A_i * A_j [m^4]. Only samples inside the first
+    lobe count, so a star whose baselines all sit past the first null costs infinity."""
     if (phi <= 0 or efficiency <= 0 or delta_t_s <= 0 or theta_rad <= 0
             or not np.isfinite(theta_rad)):
         return float("inf")
     q = 0.0
     for rho, a1a2 in zip(rho_per_baseline, area_products):
         rho = np.asarray(rho, dtype=float)
-        n_total = rho.size
-        if n_total == 0:
+        rho = rho[np.isfinite(rho) & (rho > 0)]
+        if rho.size == 0:
             continue
-        if alt_deg is not None and ext_k > 0 and len(alt_deg) == n_total:
-            w = _airmass_flux_factor(alt_deg, ext_k)
-        else:
-            w = np.ones(n_total)
-        keep = np.isfinite(rho) & (rho > 0)
-        rho, w = rho[keep], w[keep]
         x = np.pi * rho * theta_rad / lambda_m
         in_lobe = x < x_first_null
         if not in_lobe.any():
             continue
-        v2 = visibility(rho[in_lobe], theta_rad, lambda_m)          # |V|^2 on the first lobe
-        q += a1a2 * float(np.sum(v2 ** 2 * w[in_lobe] ** 2)) / n_total
+        v2 = visibility(rho[in_lobe], theta_rad, lambda_m)   # |V|^2 on the first lobe
+        q += a1a2 * float(np.sum(v2 ** 2)) / rho.size        # mean over the WHOLE night
     if q <= 0:
         return float("inf")
     return float(2.0 * snr_target ** 2 * delta_t_s / (efficiency ** 2 * phi ** 2 * q))
@@ -300,12 +276,10 @@ def search_visible_stars(ra_hours, dec_deg, lat, lon, height_m, date_str,
 @st.cache_data(show_spinner="Tracing UV coverage…")
 def traced_rho_per_star(ra_hours, dec_deg, lat, lon, height_m, date_str,
                         min_altitude_deg, baselines_t):
-    """Per star: (rho_per_baseline, alt_deg) or None. `rho_per_baseline` is a tuple of
-    per-baseline rho = sqrt(U^2+V^2) [m] tracks over the star's observable window (one tuple
-    per baseline, in `baselines_t` order); `alt_deg` is the star's altitude at the same time
-    samples. Only the astropy-heavy part is cached; coverage_score() / integration_time_s()
-    are applied on top, uncached."""
-    location = EarthLocation(lat=lat * u.deg, lon=lon * u.deg, height=height_m * u.m)
+    """Per star: a tuple of per-baseline rho = sqrt(U^2+V^2) [m] tracks over its own observable
+    window (one tuple per array baseline, in `baselines_t` order), or None if not observable /
+    no baseline. `baselines_t` is a tuple of (label, (E, N, Up)). Only the astropy-heavy part
+    is cached here; coverage_score() / integration_time_s() are applied on top, uncached."""
     out = []
     for ra_h, dec_d in zip(ra_hours, dec_deg):
         tj = find_observable_times(ra_h, dec_d, lat, lon, date_str,
@@ -313,13 +287,10 @@ def traced_rho_per_star(ra_hours, dec_deg, lat, lon, height_m, date_str,
         if len(tj) < 3 or not baselines_t:
             out.append(None)
             continue
-        rho_pb = tuple(
+        out.append(tuple(
             tuple(np.round(np.hypot(*compute_uvw_track(ra_h, dec_d, lat, lon, enu, tj)[:2]), 3))
             for _, enu in baselines_t
-        )
-        alt = SkyCoord(ra=ra_h * u.hourangle, dec=dec_d * u.deg, frame='icrs').transform_to(
-            AltAz(obstime=Time(np.asarray(tj), format='jd'), location=location)).alt.deg
-        out.append((rho_pb, tuple(np.round(alt, 2))))
+        ))
     return out
 
 
@@ -635,7 +606,6 @@ else:
             date_str, float(min_altitude_deg),
             tuple((lbl, tuple(enu)) for lbl, enu in baselines),
         )
-        ext_k = extinction_mag_per_airmass.get(band, 0.0)
         scores, t_hours = [], []
         for r, th_mas, phi in zip(rhos, theta_col, phi_col):
             th_mas = float(th_mas)
@@ -643,15 +613,13 @@ else:
                 scores.append(None)
                 t_hours.append(np.nan)
                 continue
-            rho_tuple, alt_deg = r
             th_rad = th_mas / 1000 * np.pi / (3600 * 180)
-            rho_pb = [np.asarray(b, dtype=float) for b in rho_tuple]
+            rho_pb = [np.asarray(b, dtype=float) for b in r]
             s = coverage_score(np.concatenate(rho_pb), th_rad, lambda_sel)
             scores.append(s)
             t_hours.append(integration_time_s(
                 float(phi), rho_pb, area_products, th_rad, lambda_sel, efficiency,
-                delta_t_ns * 1e-9, snr_target,
-                alt_deg=np.asarray(alt_deg, dtype=float), ext_k=ext_k) / 3600)
+                delta_t_ns * 1e-9, snr_target) / 3600)
         visible['coverage'] = [round(s['score']) if s else np.nan for s in scores]
         visible['lobe%'] = [round(s['lobe_frac'] * 100) if s else np.nan for s in scores]
         visible['t (floor)'] = [fmt_duration(h) for h in t_hours]
@@ -833,9 +801,7 @@ else:
 
             t_h = integration_time_s(
                 phi_band, [np.hypot(U, V) for _, (U, V, W) in tracks], area_products,
-                diameter_in_rad, lambda_star, efficiency, delta_t_ns * 1e-9, snr_target,
-                alt_deg=np.asarray(altitudes, dtype=float),
-                ext_k=extinction_mag_per_airmass.get(band_used, 0.0)) / 3600
+                diameter_in_rad, lambda_star, efficiency, delta_t_ns * 1e-9, snr_target) / 3600
             obs_h = len(times_jd) * 5 / 60
             st.caption(
                 f"Coverage {sc['score']:.0f}/100 — {score_verdict(sc)}.  "
