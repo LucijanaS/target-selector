@@ -109,35 +109,36 @@ def coverage_score(rho_m, theta_rad, lambda_m):
 
 
 # ---------------------------------------------------------------------------------------------------------------------------------------
-# Feasibility -- coverage says nothing about how long you'd have to integrate. The standard SII
-# SNR for one baseline (Dravins et al. 2013; Rai, Basak & Saha 2021) is
+# Feasibility -- time to measure the star's *size*, not just to detect a correlation. The
+# standard SII SNR per baseline is (Dravins et al. 2013; Rai, Basak & Saha 2021)
 #
 #     SNR = (1/sqrt(2)) * |V12|^2 * eff * Phi * sqrt(A1 A2) * sqrt( T / sqrt(dt1 dt2) )
 #
-#   1/sqrt(2)  -- unpolarised light: only same-polarisation photons bunch
-#   |V12|^2    -- squared visibility AT THAT BASELINE (evaluated along the real traced track)
-#   eff        -- detector QE x optical throughput
-#   Phi        -- spectral photon flux density [s^-1 m^-2 Hz^-1] (the catalogue's Phi_band)
-#   A1, A2     -- the two dish areas
-#   dt_i       -- detector time resolution; 1/sqrt(dt1 dt2) is the effective bandwidth
-#                 (MAGIC ~110 MHz -> dt ~ 9 ns; NOT the g^2 correlation-peak width)
+#   eff    -- detector QE x optical throughput
+#   Phi    -- spectral photon flux density [s^-1 m^-2 Hz^-1] (the catalogue's Phi_band)
+#   A1, A2 -- the two dish areas
+#   dt_i   -- detector time resolution; 1/sqrt(dt1 dt2) is the effective bandwidth
+#             (MAGIC ~110 MHz -> dt ~ 9 ns; NOT the g^2 correlation-peak width)
 #
-# Squaring and Fisher-combining over baselines + the night's time samples, solving for T:
+# It scales with |V|^2 *at that baseline*, so the useful signal is on the first lobe. Samples
+# past the first null (x = pi rho theta / lambda > 3.83) are NOT counted: their |V|^2 is tiny
+# and the size information there is model-dependent (limb darkening etc.) -- a track that
+# never reaches the first lobe therefore costs ~forever, matching a coverage score of 0.
+# Squaring and Fisher-combining first-lobe samples over the baselines and the night:
 #
-#     T = 2 S^2 sqrt(dt1 dt2) / ( eff^2 Phi^2 * sum_baselines [ A1 A2 * mean(|V|^4) ] )
+#     T = 2 S^2 sqrt(dt1 dt2)
+#         / ( eff^2 Phi^2 * sum_baselines [ A1 A2 * mean_over_night( |V|^4 * [x < 3.83] ) ] )
 #
-# Sky background, spectral channels, and the PMT excess-noise / electronic-noise / filter-shape
-# factors (each ~0.8) are left out, so it stays ~1.5x optimistic vs a full instrument model
-# (e.g. siicheduler). Knobs: eff, dt.
+# Sky background, spectral channels and the sub-2x PMT/electronics/filter factors are left
+# out, so it stays ~1.5x optimistic vs a full instrument model (e.g. siicheduler).
 # ---------------------------------------------------------------------------------------------------------------------------------------
 
 def integration_time_s(phi, rho_per_baseline, area_products, theta_rad, lambda_m,
                        efficiency, delta_t_s, snr_target=5.0):
-    """5sigma-detection time [s] from the standard SII SNR (see the block comment above).
+    """Time [s] for an `snr_target`-sigma SII size measurement (see the block comment).
     `rho_per_baseline` is a list of traced projected-baseline arrays [m] (one per array
-    baseline); `area_products` the matching A_i * A_j [m^4]. |V|^2 is evaluated along each
-    track, so over-resolved stars (baselines past the first null) cost far more than
-    'coverage' implies."""
+    baseline); `area_products` the matching A_i * A_j [m^4]. Only samples inside the first
+    lobe count, so a star whose baselines all sit past the first null costs infinity."""
     if (phi <= 0 or efficiency <= 0 or delta_t_s <= 0 or theta_rad <= 0
             or not np.isfinite(theta_rad)):
         return float("inf")
@@ -147,8 +148,12 @@ def integration_time_s(phi, rho_per_baseline, area_products, theta_rad, lambda_m
         rho = rho[np.isfinite(rho) & (rho > 0)]
         if rho.size == 0:
             continue
-        v2 = visibility(rho, theta_rad, lambda_m)          # |V(rho)|^2 along this baseline's track
-        q += a1a2 * float(np.mean(v2 ** 2))
+        x = np.pi * rho * theta_rad / lambda_m
+        in_lobe = x < x_first_null
+        if not in_lobe.any():
+            continue
+        v2 = visibility(rho[in_lobe], theta_rad, lambda_m)   # |V|^2 on the first lobe
+        q += a1a2 * float(np.sum(v2 ** 2)) / rho.size        # mean over the WHOLE night
     if q <= 0:
         return float("inf")
     return float(2.0 * snr_target ** 2 * delta_t_s / (efficiency ** 2 * phi ** 2 * q))
@@ -513,9 +518,11 @@ with st.sidebar.expander("SNR / integration-time model"):
         help="PMT quantum efficiency × optical throughput. Published: MAGIC ≈ 0.09 "
              "(Acciari et al. 2020/2024), VERITAS ≈ 0.15 (Abeysekara et al. 2020); 0.10 default.",
     )
-    st.caption("Standard SII SNR ∝ (1/√2)·|V|²·ε·Φ·√(A₁A₂)·√(T/√(Δt₁Δt₂)). Sky background, "
-               "spectral channels and the PMT excess-noise / electronics / filter factors are "
-               "left out, so times run ~1.5× optimistic vs a full instrument model.")
+    st.caption("Reported time = time for an Nσ measurement of the star's size. "
+               "Standard SII SNR ∝ (1/√2)·|V|²·ε·Φ·√(A₁A₂)·√(T/√(Δt₁Δt₂)), counting only "
+               "baseline samples inside the first lobe (past the null the size signal is "
+               "tiny and model-dependent). Sky background, spectral channels and the "
+               "PMT excess-noise / electronics / filter factors are left out → ~1.5× optimistic.")
     if _preset_dt or _preset_eff:
         st.caption("From the preset: "
                    + ", ".join(x for x in (f"Δt = {_preset_dt:g} ns" if _preset_dt else None,
@@ -626,10 +633,11 @@ else:
         st.dataframe(visible[cols])
         st.caption("coverage: 0–100, how much of the first-lobe |V|² fall-off (1 → 0, between "
                    "zero baseline and the first null) tonight's UV track captures.  "
-                   f"t({snr_target:.0f}σ): standard SII integration time (formula in the sidebar "
-                   "expander) with |V|² taken along each baseline's real track — so an "
-                   "over-resolved star (baselines past the null) is slow even at high coverage. "
-                   "Omits the sub-2× instrumental-noise terms, so ~1.5× optimistic.")
+                   f"t({snr_target:.0f}σ): time for an {snr_target:.0f}σ size measurement "
+                   "(standard SII noise model, formula in the sidebar). Only samples inside "
+                   "the first lobe count — a track that stays past the first null (however "
+                   "deep the side-lobes) reads ‘impractical’, matching coverage 0. ~1.5× "
+                   "optimistic (sub-2× instrumental terms omitted).")
     else:
         st.dataframe(visible[display_cols])
 
@@ -803,11 +811,12 @@ else:
                          pairwise_dish_diams(preset["dishes"], dish_m) for dp in pair}))
                          if preset_has_dishes(preset) else f"{dish_m:g}")
             st.caption(
-                f"Integration time for a {snr_target:.0f}σ detection "
-                f"(standard SII formula; {band_used} = {float(mag_star):.1f}, {len(baselines)} baseline"
-                f"{'s' if len(baselines) != 1 else ''}, {_dish_txt} m dishes, "
-                f"Δt {delta_t_ns:g} ns, ε {efficiency:g}): "
+                f"Time for a {snr_target:.0f}σ size measurement "
+                f"(standard SII noise model; {band_used} = {float(mag_star):.1f}, "
+                f"{len(baselines)} baseline{'s' if len(baselines) != 1 else ''}, "
+                f"{_dish_txt} m dishes, Δt {delta_t_ns:g} ns, ε {efficiency:g}): "
                 f"**{fmt_duration(t_h)}** — {feasibility_label(t_h, obs_h)}.  "
-                f"|V|² is taken along each baseline's real track, so it climbs steeply past the "
-                f"first null. Omits the sub-2× instrumental-noise terms, so ~1.5× optimistic."
+                f"Only first-lobe samples (ρ < {r_null:.0f} m) count: past the null the "
+                f"|V|² signal is tiny and the size info is model-dependent, so a track that "
+                f"never reaches the first lobe reads ‘impractical’. ~1.5× optimistic."
             )

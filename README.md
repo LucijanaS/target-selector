@@ -10,14 +10,14 @@ Given a location (typed in, or chosen from a telescope-coupling preset) and a da
   clock window). With a telescope array selected, each star gets a **UV-coverage score**
   (0–100) — how much of the first lobe of its visibility curve (|V|² from 1 at zero baseline
   to 0 at the first null, ρ = 1.22 λ/θ) tonight's UV track sweeps — and an **integration
-  time** for a 5σ detection from the standard SII SNR
-  (`SNR = 2^{-1/2}·|V₁₂|²·ε·Φ·√(A₁A₂)·√(T/√(Δt₁Δt₂))`), evaluated with the real |V|² along
-  each baseline's traced track (so an over-resolved star — baselines past the null — is slow
-  even at high coverage) and Fisher-combined over the array. Inputs (sidebar): dish size,
-  detector time resolution Δt (MAGIC ≈ 9 ns ↔ b_v ≈ 110 MHz), efficiency ε (MAGIC ≈ 0.09,
-  VERITAS ≈ 0.15). Sky background, spectral channels and the sub-2× instrumental-noise terms
-  (PMT excess noise, electronic noise, filter shape) are omitted, so it stays ~1.5×
-  optimistic vs a full model like `siicheduler`.
+  time** for a 5σ measurement of the star's size, from the standard SII SNR
+  (`SNR = 2^{-1/2}·|V₁₂|²·ε·Φ·√(A₁A₂)·√(T/√(Δt₁Δt₂))`), Fisher-combined over the array but
+  **counting only baseline samples inside the first lobe** — past the first null the |V|²
+  signal is tiny and the size information is model-dependent, so a track that never reaches
+  the first lobe reads *impractical*, matching a coverage score of 0. Inputs (sidebar): dish
+  size, detector time resolution Δt (MAGIC ≈ 9 ns ↔ b_v ≈ 110 MHz), efficiency ε (MAGIC ≈
+  0.09, VERITAS ≈ 0.15). Sky background, spectral channels and the sub-2× instrumental-noise
+  terms are omitted, so it stays ~1.5× optimistic vs a full model like `siicheduler`.
 - for a single selected star, plots its sky track, its uniform-disk visibility map with the
   UV tracks of every array baseline, and the **1-D visibility curve** |V|²(ρ) with the
   traced points marked on it, the coverage score and the estimated integration time.
