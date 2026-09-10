@@ -179,7 +179,7 @@ def feasibility_label(hours, night_hours):
 def fmt_duration(hours):
     """Coarse, prefixed with >= : this is a floor, not a schedule."""
     if not np.isfinite(hours):
-        return "—"
+        return "n/a"
     if hours < 1:
         return f"≳ {max(1, round(hours * 60 / 5) * 5):.0f} min"   # nearest 5 min, never < 1 min
     if hours < 24:
@@ -191,14 +191,14 @@ def fmt_duration(hours):
 
 def score_verdict(d):
     if d["x_min"] > x_first_null:
-        return "over-resolved — the whole track is past the first null"
+        return "over-resolved: the whole track is past the first null"
     if d["x_max"] < 0.7:
-        return "star barely resolved — the track stays on the flat top of the curve"
+        return "star barely resolved: the track stays on the flat top of the curve"
     if d["score"] >= 75:
-        return "track sweeps most of the first lobe from the bright side — excellent for θ"
+        return "track sweeps most of the first lobe from the bright side: excellent for θ"
     if d["score"] >= 40:
         return "track captures part of the first-lobe fall-off"
-    return "track captures only a small part of the fall-off — weak θ leverage"
+    return "track captures only a small part of the fall-off: weak θ leverage"
 
 
 # ---------------------------------------------------------------------------------------------------------------------------------------
@@ -324,8 +324,8 @@ st.markdown(
 st.markdown(
     """
     ### Enter parameters
-    It is best to enter all the parameters you have first -- the site coordinates (or a telescope preset),
-    the baseline, the date and the observing band -- in the sidebar on the left. Every change in the sidebar
+    It is best to enter all the parameters you have first (the site coordinates or a telescope preset,
+    the baseline, the date, the observing band) in the sidebar on the left. Every change in the sidebar
     reloads the plots and tables.
     """
 )
@@ -352,7 +352,7 @@ is_custom = preset_name == custom
 if not is_custom:
     st.sidebar.caption(f"ℹ️ {preset['note']}")
     if preset['approx']:
-        st.sidebar.caption("⚠️ Site coordinates are approximate — verify before precise UV work.")
+        st.sidebar.caption("⚠️ Site coordinates are approximate; verify before precise UV work.")
 
 band = st.sidebar.radio(
     "Observing band",
@@ -379,7 +379,7 @@ if preset_has_dishes(preset):
     lat_dec1, lon_dec1, height1 = float(site_lat), float(site_lon), float(site_height)
     baselines = pairwise_baselines(preset["dishes"])
     st.sidebar.caption(
-        f"Site: {lat_dec1:.4f}°, {lon_dec1:.4f}°, {height1:.0f} m — "
+        f"Site: {lat_dec1:.4f}°, {lon_dec1:.4f}°, {height1:.0f} m, "
         f"{len(baselines)} baseline{'s' if len(baselines) != 1 else ''} "
         f"({', '.join(lbl for lbl, _ in baselines)})."
     )
@@ -395,7 +395,7 @@ elif preset.get("movable"):
     )
     baselines = [("baseline", (float(np.sin(np.radians(b_ang)) * b_len),
                                float(np.cos(np.radians(b_ang)) * b_len), 0.0))]
-    st.sidebar.caption(f"Site: {lat_dec1:.4f}°, {lon_dec1:.4f}°, {height1:.0f} m — movable pair.")
+    st.sidebar.caption(f"Site: {lat_dec1:.4f}°, {lon_dec1:.4f}°, {height1:.0f} m, movable pair.")
 else:
     two_telescopes = st.sidebar.radio(
         "Two telescopes?",
@@ -524,7 +524,7 @@ with st.sidebar.expander("SNR / integration-time model"):
                "summed over the night. "
                "Accounts for: dish area, Φ (band magnitude), Δt, ε, the UV track. "
                "Does not: calibration, systematics, atmospheric extinction, the instrumental "
-               "noise factors. It's a lower bound — cross-check anything that looks feasible.")
+               "noise factors. It's a lower bound, so cross-check anything that looks feasible.")
     if _preset_dt or _preset_eff:
         st.caption("From the preset: "
                    + ", ".join(x for x in (f"Δt = {_preset_dt:g} ns" if _preset_dt else None,
@@ -534,7 +534,7 @@ with st.sidebar.expander("SNR / integration-time model"):
     if preset_has_dishes(preset):
         _diams = sorted({d.get("dish_m") or dish_m for d in preset["dishes"]})
         if len(_diams) > 1:
-            st.caption("Mixed dishes ({} m) — combined per baseline; the field above is the "
+            st.caption("Mixed dishes ({} m), combined per baseline; the field above is the "
                        "fallback for dishes without their own size.".format(
                            ", ".join(f"{d:g}" for d in _diams)))
 
@@ -573,7 +573,7 @@ st.write(
     str(min_altitude_deg) + "° while the Sun is down for at least 3/4 of the night" +
     (", ranked by how much of the first lobe of each star's visibility curve tonight's UV "
      "track sweeps (coverage 0–100)." if baselines else ".") +
-    "  The list updates with the sidebar; it stays put while you pick a star below."
+    "  The list updates with the sidebar."
 )
 
 # "Brightest N" is by the selected band's magnitude (fall back to V where that band is missing).
@@ -588,7 +588,7 @@ kept_idx, dark_hours = search_visible_stars(
     date_str, float(min_altitude_deg),
 )
 if dark_hours == 0:
-    st.warning("The Sun never sets at this site on this date — no dark window.")
+    st.warning("The Sun never sets at this site on this date, so there is no dark window.")
 else:
     visible = run.iloc[kept_idx].reset_index(drop=True)
     st.write(
@@ -633,13 +633,18 @@ else:
         cols = list(dict.fromkeys(cols))
         st.dataframe(visible[cols])
         st.caption(
-            "**coverage** (0–100): how much of the first-lobe |V|² fall-off (1 → 0, out to the "
-            "first null) tonight's UV track sweeps — the range that constrains θ; **x_range** "
-            "is the same span in x = π·ρ·θ/λ.  "
-            f"**t_int ({snr_target:.0f}σ)**: minimum (photon-noise-limited) integration time to "
-            f"reach SNR {snr_target:.0f} on the first-lobe signal — from dish area, Φ, Δt and ε. "
-            "It's a lower bound: calibration, systematics and instrumental noise factors are "
-            "not included, so cross-check anything that looks feasible.")
+            "What the added columns mean:\n\n"
+            "- **coverage** (0 to 100): how much of the first-lobe |V|² fall-off (from 1 at "
+            "zero baseline down to 0 at the first null) tonight's UV track sweeps. This is the "
+            "span that constrains θ.\n"
+            "- **x_range**: that same span written in x = π·ρ·θ/λ.\n"
+            f"- **t_int ({snr_target:.0f}σ)**: minimum (photon-noise-limited) integration time "
+            f"to reach SNR {snr_target:.0f} on the first-lobe signal, from dish area, Φ, Δt and "
+            "ε. It is a lower bound; calibration, systematics and instrumental noise factors "
+            "are not included, so cross-check anything that looks feasible.\n"
+            "- **feasibility**: the same estimate as a coarse verdict (within a night, a few "
+            "nights, a week or more, months), or \"not reachable\" when the track never enters "
+            "the first lobe.")
     else:
         st.dataframe(visible[display_cols])
 
@@ -677,7 +682,7 @@ phi_band = star.get(f"Phi_{band}")
 mag_star = star.get(mag_col)
 band_used = band
 if diameter_band is None or pd.isna(diameter_band):
-    st.warning(f"No {band}-band diameter for {selected_star} (missing colour index) — using V band instead.")
+    st.warning(f"No {band}-band diameter for {selected_star} (missing colour index), using V band instead.")
     diameter_band = star['Diameter_V']
     phi_band = star['Phi_V']
     mag_star = star['Vmag']
@@ -722,7 +727,7 @@ else:
     obs_hours = len(times_jd) * 5 / 60
     st.write(
         f"**Observable {date_str}:** {local_dt[0]:%H:%M}–{local_dt[-1]:%H:%M} "
-        f"({tz_label.split(',')[0].strip()}) — {obs_hours:.1f} h above {min_altitude_deg:.0f}° "
+        f"({tz_label.split(',')[0].strip()}), {obs_hours:.1f} h above {min_altitude_deg:.0f}° "
         f"with the Sun down" + (", in two spells (dips low near lower culmination)"
                                 if time_gap.any() else "") + "."
     )
@@ -812,7 +817,7 @@ else:
             axc.set_xlim(0, r_hi)
             axc.set_xlabel(r"projected baseline  $\rho=\sqrt{U^2+V^2}$  [m]")
             axc.set_ylabel(r"squared visibility  $|V|^2$")
-            axc.set_title(f"{selected_star} — {date_str}")
+            axc.set_title(f"{selected_star}, {date_str}")
             axc.grid(True, alpha=0.3)
             st.pyplot(fig4)
             plt.close(fig4)
@@ -822,21 +827,21 @@ else:
                 diameter_in_rad, lambda_star, efficiency, delta_t_ns * 1e-9, snr_target) / 3600
             obs_h = len(times_jd) * 5 / 60
             st.caption(
-                f"Coverage {sc['score']:.0f}/100 — {score_verdict(sc)}.  "
-                f"The first null (dashed) is where $|V|^2$ first reaches 0 — for a uniform disk "
+                f"Coverage {sc['score']:.0f}/100: {score_verdict(sc)}.  "
+                f"The first null (dashed) is where $|V|^2$ first reaches 0, for a uniform disk "
                 f"at ρ = 1.22 λ/θ ({r_null:.0f} m here). The best θ measurement sweeps the curve "
-                f"between there and zero baseline; going past the null adds little."
+                f"between there and zero baseline."
             )
             _dish_txt = (", ".join(f"{d:g}" for d in sorted({dp for pair in
                          pairwise_dish_diams(preset["dishes"], dish_m) for dp in pair}))
                          if preset_has_dishes(preset) else f"{dish_m:g}")
             st.caption(
-                f"Feasibility: **{feasibility_label(t_h, obs_h)}** — minimum "
+                f"Feasibility: **{feasibility_label(t_h, obs_h)}**. Minimum "
                 f"(photon-noise-limited) integration time **{fmt_duration(t_h)}** to reach "
                 f"SNR {snr_target:.0f} on the first-lobe signal (ρ < {r_null:.0f} m) "
                 f"({band_used} = {float(mag_star):.1f}, "
                 f"{len(baselines)} baseline{'s' if len(baselines) != 1 else ''}, "
                 f"{_dish_txt} m dishes, Δt {delta_t_ns:g} ns, ε {efficiency:g}). "
-                f"A lower bound — calibration, systematics and instrumental noise factors "
+                f"A lower bound; calibration, systematics and instrumental noise factors "
                 f"aren't included, so cross-check before relying on it."
             )

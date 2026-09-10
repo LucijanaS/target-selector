@@ -111,7 +111,7 @@ custom = "Custom (enter manually)"
 
 # Fields used only by the SII integration-time estimate (Rai/Basak/Saha 2021 noise model):
 #   dish_m      light-collector diameter [m]; area ~ pi (dish_m/2)^2. A dish dict may carry
-#               its own dish_m to override this (mixed arrays, e.g. MAGIC x2 + LST-1).
+#               its own dish_m to override this (mixed arrays, e.g. MAGIC + LST-1).
 #   delta_t_ns  detector time resolution [ns]; 1/sqrt(dt_i dt_j) is the effective bandwidth
 #               in the SII SNR formula. MAGIC's b_v ~ 110 MHz -> dt ~ 9 ns.
 #   efficiency  detector QE x optical throughput.
@@ -125,8 +125,8 @@ telescope_presets = {
 
     "MAGIC (La Palma)": dict(
         dishes=_magic, dish_m=17.0, delta_t_ns=9.09, efficiency=0.09, approx=False,
-        note="MAGIC-1 ↔ MAGIC-2, Roque de los Muchachos. Δt ≈ 9 ns (b_v ≈ 110 MHz) and ε ≈ 0.09 from the "
-             "siicheduler MAGIC config (Acciari et al. 2020/2024).",
+        note="MAGIC-1 ↔ MAGIC-2, Roque de los Muchachos. b_v ≈ 110 MHz (Δt ≈ 9 ns) and "
+             "ε ≈ 0.09 from Acciari et al. (2020, 2024).",
     ),
 
     "VERITAS (Whipple, Arizona)": dict(
@@ -155,7 +155,7 @@ telescope_presets = {
         note="LST-1..4 → 6 baselines, Roque de los Muchachos. No published SII bandwidth/efficiency.",
     ),
 
-    "MAGIC ×2 + LST-1 (La Palma)": dict(
+    "MAGIC + LST-1 (La Palma)": dict(
         dishes=_magic_lst1, dish_m=17.0, delta_t_ns=9.09, efficiency=0.09, approx=False,
         note="MAGIC-1, MAGIC-2 (17 m) and LST-1 (23 m) → 3 baselines. Mixed dish sizes are "
              "handled per pair.",
