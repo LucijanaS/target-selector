@@ -519,11 +519,12 @@ with st.sidebar.expander("SNR / integration-time model"):
         help="PMT quantum efficiency × optical throughput. Published: MAGIC ≈ 0.09 "
              "(Acciari et al. 2020/2024), VERITAS ≈ 0.15 (Abeysekara et al. 2020); 0.10 default.",
     )
-    st.caption("Reported time: photon-noise floor for the first-lobe SII signal to reach Nσ, "
-               "from SNR ∝ (1/√2)·|V|²·ε·Φ·√(A₁A₂)·√(T/√(Δt₁Δt₂)) summed over the night. "
+    st.caption("`t_int` = minimum (photon-noise-limited) integration time to reach the target "
+               "SNR on the first-lobe signal, from SNR ∝ (1/√2)·|V|²·ε·Φ·√(A₁A₂)·√(T/√(Δt₁Δt₂)) "
+               "summed over the night. "
                "Accounts for: dish area, Φ (band magnitude), Δt, ε, the UV track. "
-               "Does not: calibration, systematics, atmospheric extinction, the sub-2× "
-               "instrumental factors. Cross-check anything that looks feasible.")
+               "Does not: calibration, systematics, atmospheric extinction, the instrumental "
+               "noise factors. It's a lower bound — cross-check anything that looks feasible.")
     if _preset_dt or _preset_eff:
         st.caption("From the preset: "
                    + ", ".join(x for x in (f"Δt = {_preset_dt:g} ns" if _preset_dt else None,
@@ -622,22 +623,23 @@ else:
                 float(phi), rho_pb, area_products, th_rad, lambda_sel, efficiency,
                 delta_t_ns * 1e-9, snr_target) / 3600)
         visible['coverage'] = [round(s['score']) if s else np.nan for s in scores]
-        visible['lobe%'] = [round(s['lobe_frac'] * 100) if s else np.nan for s in scores]
-        visible['t (floor)'] = [fmt_duration(h) for h in t_hours]
+        visible[f't_int ({snr_target:.0f}σ)'] = [fmt_duration(h) for h in t_hours]
         visible['feasibility'] = [feasibility_label(h, dark_hours) for h in t_hours]
         visible['x_range'] = [f"{s['x_min']:.1f}–{s['x_max']:.1f}" if s else "" for s in scores]
         visible = visible.sort_values('coverage', ascending=False, na_position='last') \
                          .reset_index(drop=True)
-        cols = ['BayerF', 'Common', mag_col, diam_col, 'coverage', 'lobe%',
-                't (floor)', 'feasibility', 'x_range', 'RA', 'Dec']
+        cols = ['BayerF', 'Common', mag_col, diam_col, 'coverage',
+                f't_int ({snr_target:.0f}σ)', 'feasibility', 'x_range', 'RA', 'Dec']
         cols = list(dict.fromkeys(cols))
         st.dataframe(visible[cols])
         st.caption(
-            "**coverage** (0–100): how much of the first-lobe |V|² fall-off tonight's UV track "
-            "sweeps — the thing that constrains the diameter.  "
-            f"**t (floor)**: photon-noise floor for the first-lobe signal to reach "
-            f"{snr_target:.0f}σ (dish area, Φ, Δt, ε, the UV track). No calibration, "
-            "systematics or extinction — cross-check anything that looks feasible.")
+            "**coverage** (0–100): how much of the first-lobe |V|² fall-off (1 → 0, out to the "
+            "first null) tonight's UV track sweeps — the range that constrains θ; **x_range** "
+            "is the same span in x = π·ρ·θ/λ.  "
+            f"**t_int ({snr_target:.0f}σ)**: minimum (photon-noise-limited) integration time to "
+            f"reach SNR {snr_target:.0f} on the first-lobe signal — from dish area, Φ, Δt and ε. "
+            "It's a lower bound: calibration, systematics and instrumental noise factors are "
+            "not included, so cross-check anything that looks feasible.")
     else:
         st.dataframe(visible[display_cols])
 
@@ -712,6 +714,19 @@ else:
     time_labels = [dt.strftime('%H:%M') for dt in local_dt]
     xtick_step = max(1, len(time_labels) // 8)
 
+    # Where the track has a time gap (star dips below the altitude limit around lower
+    # culmination and comes back) -- used both for the text below and to break plot lines.
+    _dt = np.diff(times_jd)
+    time_gap = np.concatenate([[False], _dt > 2.5 * np.median(_dt)]) if len(_dt) else \
+        np.zeros(len(times_jd), bool)
+    obs_hours = len(times_jd) * 5 / 60
+    st.write(
+        f"**Observable {date_str}:** {local_dt[0]:%H:%M}–{local_dt[-1]:%H:%M} "
+        f"({tz_label.split(',')[0].strip()}) — {obs_hours:.1f} h above {min_altitude_deg:.0f}° "
+        f"with the Sun down" + (", in two spells (dips low near lower culmination)"
+                                if time_gap.any() else "") + "."
+    )
+
     fig1, ax1 = plt.subplots(figsize=(9, 4.5))
     sc = ax1.scatter(time_labels, altitudes, c=azimuths)
     plt.colorbar(sc, label='Azimuth [°]', ax=ax1)
@@ -752,10 +767,15 @@ else:
                          extent=(-size_to_plot, size_to_plot, -size_to_plot, size_to_plot),
                          origin='lower', cmap='gray', zorder=0)
         for (lbl, (U, V, W)), c in zip(tracks, track_colours):
-            ax2.plot(U, V, '-', color=c, lw=1.0, alpha=0.9, zorder=3)
+            # Break the connecting line across any time gap so it doesn't draw a
+            # straight chord between the two spells of observability.
+            Ul, Vl = np.array(U, float), np.array(V, float)
+            Ul[time_gap] = np.nan
+            Vl[time_gap] = np.nan
+            ax2.plot(Ul, Vl, '-', color=c, lw=1.0, alpha=0.9, zorder=3)
+            ax2.plot(-Ul, -Vl, '-', color=c, lw=1.0, alpha=0.9, zorder=3)
             ax2.plot(U, V, 'o', color=c, ms=4, markeredgecolor='black', markeredgewidth=0.4,
                      label=lbl, zorder=4)
-            ax2.plot(-U, -V, '-', color=c, lw=1.0, alpha=0.9, zorder=3)
             ax2.plot(-U, -V, 'o', color=c, ms=4, markeredgecolor='black', markeredgewidth=0.4,
                      zorder=4)
         ax2.set_xlim(-size_to_plot, size_to_plot)
@@ -811,10 +831,12 @@ else:
                          pairwise_dish_diams(preset["dishes"], dish_m) for dp in pair}))
                          if preset_has_dishes(preset) else f"{dish_m:g}")
             st.caption(
-                f"Feasibility: **{feasibility_label(t_h, obs_h)}** — photon-noise floor "
-                f"**{fmt_duration(t_h)}** for the first-lobe signal (ρ < {r_null:.0f} m) to "
-                f"reach {snr_target:.0f}σ ({band_used} = {float(mag_star):.1f}, "
+                f"Feasibility: **{feasibility_label(t_h, obs_h)}** — minimum "
+                f"(photon-noise-limited) integration time **{fmt_duration(t_h)}** to reach "
+                f"SNR {snr_target:.0f} on the first-lobe signal (ρ < {r_null:.0f} m) "
+                f"({band_used} = {float(mag_star):.1f}, "
                 f"{len(baselines)} baseline{'s' if len(baselines) != 1 else ''}, "
                 f"{_dish_txt} m dishes, Δt {delta_t_ns:g} ns, ε {efficiency:g}). "
-                f"No calibration, systematics or extinction; cross-check before relying on it."
+                f"A lower bound — calibration, systematics and instrumental noise factors "
+                f"aren't included, so cross-check before relying on it."
             )
