@@ -20,12 +20,15 @@ from brightstar_functions import (
     dms_to_decimal, lambda_U, lambda_V, lambda_B,
 )
 from telescopes import (
-    telescope_presets, custom, preset_has_dishes, preset_site,
+    telescope_presets, custom, narrabri, preset_has_dishes, preset_site,
     pairwise_baselines, pairwise_dish_diams, latlon_to_enu,
 )
 from telescope_coords import parse_lat_lon
 
 # - * - coding: utf - 8 - * -
+
+# Must precede every other Streamlit call, including the cached catalogue load below.
+st.set_page_config(layout="wide")
 
 # ---------------------------------------------------------------------------------------------------------------------------------------
 # ---------------------------------------------------------------------------------------------------------------------------------------
@@ -343,6 +346,7 @@ date_str = date.isoformat()
 preset_name = st.sidebar.selectbox(
     "Telescope coupling",
     list(telescope_presets),
+    index=list(telescope_presets).index(narrabri),
     help="Pick a known site + dish pair to auto-fill the coordinates and baseline, or "
          "'Custom' to enter everything by hand.",
 )
@@ -732,6 +736,11 @@ else:
                                 if time_gap.any() else "") + "."
     )
 
+    # Sky track, visibility map and 1-D visibility curve share one row (the page is wide);
+    # the row has as many columns as there are plots to show this run.
+    n_plots = 1 + (1 if baselines else 0) + (1 if baselines and diameter_in_rad > 0 else 0)
+    plot_cols = st.columns(n_plots)
+
     fig1, ax1 = plt.subplots(figsize=(9, 4.5))
     sc = ax1.scatter(time_labels, altitudes, c=azimuths)
     plt.colorbar(sc, label='Azimuth [°]', ax=ax1)
@@ -741,7 +750,8 @@ else:
     ax1.set_ylabel('Altitude [°]')
     ax1.set_ylim(0, 90)
     ax1.grid(True)
-    st.pyplot(fig1)
+    with plot_cols[0]:
+        st.pyplot(fig1)
     plt.close(fig1)
 
     if not baselines:
@@ -752,8 +762,6 @@ else:
         # conjugate -U,-V are measured by an intensity interferometer).
         tracks = [(lbl, compute_uvw_track(given_ra_decimal, given_dec_decimal, lat, lon, enu, times_jd))
                   for lbl, enu in baselines]
-        st.caption("Baselines: " +
-                   ", ".join(f"{lbl} ({np.linalg.norm(enu):.0f} m)" for lbl, enu in baselines))
 
         # Frame the plot to the actual UV coverage, so the tracks fill it rather than
         # sitting in a corner of a box sized by the nominal baseline length.
@@ -791,7 +799,10 @@ else:
         ax2.set_aspect('equal')
         ax2.legend(fontsize=7, loc='upper right', framealpha=0.85)
         plt.colorbar(cax, label="Squared visibility", ax=ax2)
-        st.pyplot(fig2)
+        with plot_cols[1]:
+            st.caption("Baselines: " +
+                       ", ".join(f"{lbl} ({np.linalg.norm(enu):.0f} m)" for lbl, enu in baselines))
+            st.pyplot(fig2)
         plt.close(fig2)
 
         # 1-D visibility curve with the actually-traced points marked on it. Linear y: the first
@@ -819,7 +830,8 @@ else:
             axc.set_ylabel(r"squared visibility  $|V|^2$")
             axc.set_title(f"{selected_star}, {date_str}")
             axc.grid(True, alpha=0.3)
-            st.pyplot(fig4)
+            with plot_cols[2]:
+                st.pyplot(fig4)
             plt.close(fig4)
 
             t_h = integration_time_s(
