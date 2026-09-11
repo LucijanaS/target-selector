@@ -5,6 +5,7 @@ import warnings
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from matplotlib.offsetbox import OffsetImage, AnnotationBbox
 import pytz
 import streamlit as st
 from timezonefinder import TimezoneFinder
@@ -215,34 +216,58 @@ def score_verdict(d):
 
 
 # ---------------------------------------------------------------------------------------------------------------------------------------
-# Moon: altitude, angular separation from the target, and phase -- moonlight raises the sky
-# background and, this close to the target, scattered light in the optics, so both how bright
-# the Moon is and how far away it stays are useful context for the night's plots.
+# Moon: altitude track and phase, drawn into the sky-track plot so it's visible at a glance
+# whether the Moon is anywhere near the target tonight (both up at similar altitude/azimuth)
+# and how much it's lighting up the sky.
 # ---------------------------------------------------------------------------------------------------------------------------------------
 
 _moon_phase_names = ["New Moon", "Waxing Crescent", "First Quarter", "Waxing Gibbous",
                      "Full Moon", "Waning Gibbous", "Last Quarter", "Waning Crescent"]
 
 
-def moon_info(obs_times, location, star_coord):
-    """(moon_alt_deg, moon_az_deg, separation_deg, illum_pct, phase_name) for the Moon over
-    `obs_times` at `location`; illum_pct/phase_name use the Sun-Moon ecliptic-longitude
-    difference (the Moon's 'age', 0-360°) evaluated at the middle of the window, since the
-    phase barely changes over one night. `get_body`/`get_sun` use astropy's low-precision
-    built-in ephemeris -- plenty for this (arcmin-level), no extra data file needed."""
+def moon_info(obs_times, location):
+    """(moon_alt_deg, age_deg, illum_pct, phase_name) for the Moon over `obs_times` at
+    `location`. age_deg/illum_pct/phase_name use the Sun-Moon ecliptic-longitude difference
+    (the Moon's 'age', 0-360°, 0/360=new, 180=full) evaluated at the middle of the window,
+    since the phase barely changes over one night. `get_body`/`get_sun` use astropy's
+    low-precision built-in ephemeris -- plenty for this (arcmin-level), no extra data file."""
+    moon = get_body("moon", obs_times, location=location)
+    moon_alt = moon.transform_to(AltAz(obstime=obs_times, location=location)).alt.deg
+    mid = obs_times[len(obs_times) // 2]
+    moon_mid = get_body("moon", mid, location=location)
+    sun_mid = get_sun(mid)
     with warnings.catch_warnings():
-        warnings.simplefilter("ignore")   # benign GCRS/ICRS frame-direction warning
-        moon = get_body("moon", obs_times, location=location)
-        moon_altaz = moon.transform_to(AltAz(obstime=obs_times, location=location))
-        separation = star_coord.separation(moon).deg
-        mid = obs_times[len(obs_times) // 2]
-        moon_mid = get_body("moon", mid, location=location)
-        sun_mid = get_sun(mid)
+        warnings.simplefilter("ignore")   # benign GCRS/ecliptic frame-direction warning
         age_deg = (moon_mid.transform_to(GeocentricTrueEcliptic(equinox=mid)).lon
                    - sun_mid.transform_to(GeocentricTrueEcliptic(equinox=mid)).lon).deg % 360
     illum_pct = (1 - np.cos(np.radians(age_deg))) / 2 * 100
     phase_name = _moon_phase_names[int(((age_deg + 22.5) % 360) // 45)]
-    return moon_altaz.alt.deg, moon_altaz.az.deg, separation, illum_pct, phase_name
+    return moon_alt, age_deg, illum_pct, phase_name
+
+
+def moon_icon_rgba(age_deg, n=28):
+    """(n, n, 4) RGBA array of the Moon's illuminated silhouette for `age_deg` (0/360=new,
+    180=full), for use as a small image marker so the sky-track plot shows what the phase
+    actually looks like rather than just a dot. The terminator is modelled as the orthographic
+    projection of the day/night boundary: at position (x, y) on the unit disk, illuminated iff
+    x >= cos(age)*sqrt(1-y^2) while waxing (age <= 180), or -x >= cos(age)*sqrt(1-y^2) while
+    waning -- reduces to the familiar half-disk at the quarters and the full/empty disk at
+    full/new. Real orientation on sky depends on hemisphere and parallactic angle; this always
+    lights from the +x side while waxing, which is a reasonable, not exact, convention."""
+    yy, xx = np.mgrid[1:-1:n * 1j, -1:1:n * 1j]
+    disk = xx ** 2 + yy ** 2 <= 1
+    half_w = np.sqrt(np.clip(1 - yy ** 2, 0, None))
+    a = np.cos(np.radians(age_deg))
+    lit = (xx >= a * half_w) if age_deg <= 180 else (-xx >= a * half_w)
+    lit &= disk
+    edge = disk & (np.abs(np.hypot(xx, yy) - 1) < 0.06)
+    rgba = np.zeros((n, n, 4))
+    rgba[..., 0] = np.where(lit, 0.95, 0.18)
+    rgba[..., 1] = np.where(lit, 0.95, 0.20)
+    rgba[..., 2] = np.where(lit, 0.9, 0.28)
+    rgba[edge, :3] = 0.35
+    rgba[..., 3] = disk.astype(float)
+    return rgba
 
 
 # ---------------------------------------------------------------------------------------------------------------------------------------
@@ -757,8 +782,7 @@ else:
     altaz = star_coord.transform_to(AltAz(obstime=obs_times, location=location))
     altitudes = altaz.alt.deg
     azimuths = altaz.az.deg
-    moon_alt, moon_az, moon_sep, moon_illum_pct, moon_phase_name = moon_info(
-        obs_times, location, star_coord)
+    moon_alt, moon_age_deg, moon_illum_pct, moon_phase_name = moon_info(obs_times, location)
     local_dt = (obs_times + utc_offset * u.hour).to_datetime()
     time_labels = [dt.strftime('%H:%M') for dt in local_dt]
     xtick_step = max(1, len(time_labels) // 8)
@@ -776,16 +800,23 @@ else:
                                 if time_gap.any() else "") + "."
     )
 
-    # Sky track, visibility map and 1-D visibility curve share one row (the page is wide);
-    # the row has as many columns as there are plots to show this run.
-    n_plots = 1 + (1 if baselines else 0) + (1 if baselines and diameter_in_rad > 0 else 0)
-    plot_cols = st.columns(n_plots)
+    # Sky track, visibility-vs-baseline curve, baseline-swept-over-night and visibility map
+    # share a 2x2 grid (the page is wide). Columns are placeholders Streamlit lets you fill
+    # in any order, so each plot lands in its quadrant regardless of where it's built below:
+    #   top-left: sky track          top-right:    |V|^2 vs baseline
+    #   bottom-left: baseline vs time   bottom-right: visibility map
+    (grid_tl, grid_tr), (grid_bl, grid_br) = st.columns(2), st.columns(2)
 
     fig1, ax1 = plt.subplots(figsize=(9, 4.5))
-    sc = ax1.scatter(time_labels, altitudes, c=azimuths)
+    sc = ax1.scatter(time_labels, altitudes, c=azimuths, zorder=3)
     plt.colorbar(sc, label='Azimuth [°]', ax=ax1)
-    ax1.plot(time_labels, moon_alt, '--', color='0.6', lw=1.3, zorder=1,
+    ax1.plot(time_labels, moon_alt, '-', color='0.6', lw=1.0, zorder=1,
              label=f"Moon ({moon_phase_name}, {moon_illum_pct:.0f}% illuminated)")
+    n_icons = min(6, len(time_labels))
+    icon = OffsetImage(moon_icon_rgba(moon_age_deg), zoom=0.5)
+    for i in np.linspace(0, len(time_labels) - 1, n_icons).round().astype(int):
+        ax1.add_artist(AnnotationBbox(icon, (time_labels[i], moon_alt[i]),
+                                      frameon=False, zorder=4))
     ax1.legend(fontsize=7, loc='upper right')
     ax1.set_xticks(time_labels[::xtick_step])
     ax1.set_title("Celestial path of " + str(BayerF))
@@ -793,30 +824,14 @@ else:
     ax1.set_ylabel('Altitude [°]')
     ax1.set_ylim(0, 90)
     ax1.grid(True)
-    with plot_cols[0]:
+    with grid_tl:
         st.pyplot(fig1)
     plt.close(fig1)
 
-    fig6, ax6 = plt.subplots(figsize=(9, 3))
-    ax6.plot(time_labels, moon_sep, '-', color='0.4', lw=1.5)
-    ax6.axhspan(0, 30, color='0.85', zorder=0)   # rule of thumb: within 30 deg, moonlight bites
-    ax6.set_xticks(time_labels[::xtick_step])
-    ax6.set_title(f"Moon separation from {selected_star}")
-    ax6.set_xlabel(f'Local time ({tz_label})')
-    ax6.set_ylabel('Separation [°]')
-    ax6.set_ylim(0, 180)
-    ax6.grid(True, alpha=0.3)
-    st.pyplot(fig6)
-    plt.close(fig6)
-    st.caption(
-        f"Moon: {moon_phase_name}, {moon_illum_pct:.0f}% illuminated tonight; "
-        f"{moon_sep.min():.0f}°–{moon_sep.max():.0f}° from {selected_star} (shaded band: "
-        f"closer than 30°, where scattered moonlight is most likely to raise the background)."
-    )
-
     if not baselines:
-        st.info("Choose a telescope-array preset, or set **Two telescopes → Yes** with a "
-                "non-zero baseline, to see the visibility map and UV coverage.")
+        with grid_tr:
+            st.info("Choose a telescope-array preset, or set **Two telescopes → Yes** with a "
+                    "non-zero baseline, to see the visibility map and UV coverage.")
     else:
         # One UVW track per baseline over the observable window (both this point and its
         # conjugate -U,-V are measured by an intensity interferometer).
@@ -859,7 +874,7 @@ else:
         ax2.set_aspect('equal')
         ax2.legend(fontsize=7, loc='upper right', framealpha=0.85)
         plt.colorbar(cax, label="Squared visibility", ax=ax2)
-        with plot_cols[1]:
+        with grid_br:
             st.caption("Baselines: " +
                        ", ".join(f"{lbl} ({np.linalg.norm(enu):.0f} m)" for lbl, enu in baselines))
             st.pyplot(fig2)
@@ -890,7 +905,7 @@ else:
             axc.set_ylabel(r"squared visibility  $|V|^2$")
             axc.set_title(f"{selected_star}, {date_str}")
             axc.grid(True, alpha=0.3)
-            with plot_cols[2]:
+            with grid_tr:
                 st.pyplot(fig4)
             plt.close(fig4)
 
@@ -943,5 +958,6 @@ else:
             ax5.set_ylabel(r"projected baseline  $\rho$  [m]")
             ax5.set_title("Baseline swept over the night (shading: $|V|^2$)")
             ax5.legend(fontsize=7, loc='upper right', framealpha=0.85)
-            st.pyplot(fig5)
+            with grid_bl:
+                st.pyplot(fig5)
             plt.close(fig5)
