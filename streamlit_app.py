@@ -1,5 +1,6 @@
 import json
 import datetime
+import warnings
 
 import numpy as np
 import pandas as pd
@@ -10,7 +11,9 @@ from timezonefinder import TimezoneFinder
 
 import astropy.units as u
 from astropy.time import Time
-from astropy.coordinates import SkyCoord, EarthLocation, AltAz, get_sun
+from astropy.coordinates import (
+    SkyCoord, EarthLocation, AltAz, get_sun, get_body, GeocentricTrueEcliptic,
+)
 
 # Explicit imports (not `from brightstar_functions import *`) so a stale copy of
 # brightstar_functions.py fails loudly here at startup instead of as a NameError deep
@@ -182,7 +185,7 @@ def feasibility_label(hours, night_hours):
 def fmt_duration(hours):
     """Coarse, prefixed with >= : this is a floor, not a schedule."""
     if not np.isfinite(hours):
-        return "n/a"
+        return "unreachable"
     if hours < 1:
         return f"≳ {max(1, round(hours * 60 / 5) * 5):.0f} min"   # nearest 5 min, never < 1 min
     if hours < 24:
@@ -193,15 +196,53 @@ def fmt_duration(hours):
 
 
 def score_verdict(d):
+    """(grade, detail) for tonight's baseline/star pairing: a plain-language SII verdict
+    instead of exposing 'coverage' jargon, using the terms this community uses for how much
+    of the visibility fall-off a track sweeps (rather than optical-interferometry's
+    'over-resolved')."""
     if d["x_min"] > x_first_null:
-        return "over-resolved: the whole track is past the first null"
+        return ("Not usable", "the whole track lies beyond the first null, so this baseline "
+                               "carries no size information on this star tonight")
     if d["x_max"] < 0.7:
-        return "star barely resolved: the track stays on the flat top of the curve"
+        return ("Poor", "the star is barely resolved; the track stays on the flat top of "
+                        "the curve")
     if d["score"] >= 75:
-        return "track sweeps most of the first lobe from the bright side: excellent for θ"
+        return ("Optimal", "the track sweeps most of the first lobe from the bright side")
     if d["score"] >= 40:
-        return "track captures part of the first-lobe fall-off"
-    return "track captures only a small part of the fall-off: weak θ leverage"
+        return ("Good", "the track captures part of the first-lobe fall-off")
+    return ("Sub-optimal", "the track captures only a small part of the fall-off, weak θ "
+                           "leverage")
+
+
+# ---------------------------------------------------------------------------------------------------------------------------------------
+# Moon: altitude, angular separation from the target, and phase -- moonlight raises the sky
+# background and, this close to the target, scattered light in the optics, so both how bright
+# the Moon is and how far away it stays are useful context for the night's plots.
+# ---------------------------------------------------------------------------------------------------------------------------------------
+
+_moon_phase_names = ["New Moon", "Waxing Crescent", "First Quarter", "Waxing Gibbous",
+                     "Full Moon", "Waning Gibbous", "Last Quarter", "Waning Crescent"]
+
+
+def moon_info(obs_times, location, star_coord):
+    """(moon_alt_deg, moon_az_deg, separation_deg, illum_pct, phase_name) for the Moon over
+    `obs_times` at `location`; illum_pct/phase_name use the Sun-Moon ecliptic-longitude
+    difference (the Moon's 'age', 0-360°) evaluated at the middle of the window, since the
+    phase barely changes over one night. `get_body`/`get_sun` use astropy's low-precision
+    built-in ephemeris -- plenty for this (arcmin-level), no extra data file needed."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")   # benign GCRS/ICRS frame-direction warning
+        moon = get_body("moon", obs_times, location=location)
+        moon_altaz = moon.transform_to(AltAz(obstime=obs_times, location=location))
+        separation = star_coord.separation(moon).deg
+        mid = obs_times[len(obs_times) // 2]
+        moon_mid = get_body("moon", mid, location=location)
+        sun_mid = get_sun(mid)
+        age_deg = (moon_mid.transform_to(GeocentricTrueEcliptic(equinox=mid)).lon
+                   - sun_mid.transform_to(GeocentricTrueEcliptic(equinox=mid)).lon).deg % 360
+    illum_pct = (1 - np.cos(np.radians(age_deg))) / 2 * 100
+    phase_name = _moon_phase_names[int(((age_deg + 22.5) % 360) // 45)]
+    return moon_altaz.alt.deg, moon_altaz.az.deg, separation, illum_pct, phase_name
 
 
 # ---------------------------------------------------------------------------------------------------------------------------------------
@@ -629,26 +670,24 @@ else:
         visible['coverage'] = [round(s['score']) if s else np.nan for s in scores]
         visible[f't_int ({snr_target:.0f}σ)'] = [fmt_duration(h) for h in t_hours]
         visible['feasibility'] = [feasibility_label(h, dark_hours) for h in t_hours]
-        visible['x_range'] = [f"{s['x_min']:.1f}–{s['x_max']:.1f}" if s else "" for s in scores]
         visible = visible.sort_values('coverage', ascending=False, na_position='last') \
                          .reset_index(drop=True)
         cols = ['BayerF', 'Common', mag_col, diam_col, 'coverage',
-                f't_int ({snr_target:.0f}σ)', 'feasibility', 'x_range', 'RA', 'Dec']
+                f't_int ({snr_target:.0f}σ)', 'feasibility', 'RA', 'Dec']
         cols = list(dict.fromkeys(cols))
         st.dataframe(visible[cols])
         st.caption(
             "What the added columns mean:\n\n"
             "- **coverage** (0 to 100): how much of the first-lobe |V|² fall-off (from 1 at "
-            "zero baseline down to 0 at the first null) tonight's UV track sweeps. This is the "
-            "span that constrains θ.\n"
-            "- **x_range**: that same span written in x = π·ρ·θ/λ.\n"
+            "zero baseline down to 0 at the first null) tonight's UV track sweeps.\n"
             f"- **t_int ({snr_target:.0f}σ)**: minimum (photon-noise-limited) integration time "
             f"to reach SNR {snr_target:.0f} on the first-lobe signal, from dish area, Φ, Δt and "
             "ε. It is a lower bound; calibration, systematics and instrumental noise factors "
             "are not included, so cross-check anything that looks feasible.\n"
-            "- **feasibility**: the same estimate as a coarse verdict (within a night, a few "
-            "nights, a week or more, months), or \"not reachable\" when the track never enters "
-            "the first lobe.")
+            "- **feasibility**: folds both of the above into one coarse verdict, gated by "
+            "whether the track ever enters the first lobe at all (else \"not reachable\") and "
+            "then by how t_int compares to the night (within a night, a few nights, a week or "
+            "more, months, or impractical).")
     else:
         st.dataframe(visible[display_cols])
 
@@ -712,13 +751,14 @@ if len(times_jd) < 3:
                f"(never above {min_altitude_deg}° while the Sun is down).")
 else:
     obs_times = Time(times_jd, format='jd')
+    location = EarthLocation(lat=lat, lon=lon, height=height1)
     star_coord = SkyCoord(given_ra_decimal, given_dec_decimal,
                           unit=(u.hourangle, u.deg), frame='icrs')
-    altaz = star_coord.transform_to(
-        AltAz(obstime=obs_times, location=EarthLocation(lat=lat, lon=lon, height=height1))
-    )
+    altaz = star_coord.transform_to(AltAz(obstime=obs_times, location=location))
     altitudes = altaz.alt.deg
     azimuths = altaz.az.deg
+    moon_alt, moon_az, moon_sep, moon_illum_pct, moon_phase_name = moon_info(
+        obs_times, location, star_coord)
     local_dt = (obs_times + utc_offset * u.hour).to_datetime()
     time_labels = [dt.strftime('%H:%M') for dt in local_dt]
     xtick_step = max(1, len(time_labels) // 8)
@@ -744,6 +784,9 @@ else:
     fig1, ax1 = plt.subplots(figsize=(9, 4.5))
     sc = ax1.scatter(time_labels, altitudes, c=azimuths)
     plt.colorbar(sc, label='Azimuth [°]', ax=ax1)
+    ax1.plot(time_labels, moon_alt, '--', color='0.6', lw=1.3, zorder=1,
+             label=f"Moon ({moon_phase_name}, {moon_illum_pct:.0f}% illuminated)")
+    ax1.legend(fontsize=7, loc='upper right')
     ax1.set_xticks(time_labels[::xtick_step])
     ax1.set_title("Celestial path of " + str(BayerF))
     ax1.set_xlabel(f'Local time ({tz_label})')
@@ -753,6 +796,23 @@ else:
     with plot_cols[0]:
         st.pyplot(fig1)
     plt.close(fig1)
+
+    fig6, ax6 = plt.subplots(figsize=(9, 3))
+    ax6.plot(time_labels, moon_sep, '-', color='0.4', lw=1.5)
+    ax6.axhspan(0, 30, color='0.85', zorder=0)   # rule of thumb: within 30 deg, moonlight bites
+    ax6.set_xticks(time_labels[::xtick_step])
+    ax6.set_title(f"Moon separation from {selected_star}")
+    ax6.set_xlabel(f'Local time ({tz_label})')
+    ax6.set_ylabel('Separation [°]')
+    ax6.set_ylim(0, 180)
+    ax6.grid(True, alpha=0.3)
+    st.pyplot(fig6)
+    plt.close(fig6)
+    st.caption(
+        f"Moon: {moon_phase_name}, {moon_illum_pct:.0f}% illuminated tonight; "
+        f"{moon_sep.min():.0f}°–{moon_sep.max():.0f}° from {selected_star} (shaded band: "
+        f"closer than 30°, where scattered moonlight is most likely to raise the background)."
+    )
 
     if not baselines:
         st.info("Choose a telescope-array preset, or set **Two telescopes → Yes** with a "
@@ -838,8 +898,9 @@ else:
                 phi_band, [np.hypot(U, V) for _, (U, V, W) in tracks], area_products,
                 diameter_in_rad, lambda_star, efficiency, delta_t_ns * 1e-9, snr_target) / 3600
             obs_h = len(times_jd) * 5 / 60
+            grade, detail = score_verdict(sc)
             st.caption(
-                f"Coverage {sc['score']:.0f}/100: {score_verdict(sc)}.  "
+                f"**{grade}** for measuring θ tonight (score {sc['score']:.0f}/100): {detail}. "
                 f"The first null (dashed) is where $|V|^2$ first reaches 0, for a uniform disk "
                 f"at ρ = 1.22 λ/θ ({r_null:.0f} m here). The best θ measurement sweeps the curve "
                 f"between there and zero baseline."
@@ -847,13 +908,40 @@ else:
             _dish_txt = (", ".join(f"{d:g}" for d in sorted({dp for pair in
                          pairwise_dish_diams(preset["dishes"], dish_m) for dp in pair}))
                          if preset_has_dishes(preset) else f"{dish_m:g}")
+            _t_int_txt = (f"Minimum (photon-noise-limited) integration time "
+                          f"**{fmt_duration(t_h)}** to reach SNR {snr_target:.0f} on the "
+                          f"first-lobe signal (ρ < {r_null:.0f} m)" if np.isfinite(t_h) else
+                          f"No integration time reaches SNR {snr_target:.0f}, because the "
+                          f"track never enters the first lobe (ρ < {r_null:.0f} m)")
             st.caption(
-                f"Feasibility: **{feasibility_label(t_h, obs_h)}**. Minimum "
-                f"(photon-noise-limited) integration time **{fmt_duration(t_h)}** to reach "
-                f"SNR {snr_target:.0f} on the first-lobe signal (ρ < {r_null:.0f} m) "
+                f"Feasibility: **{feasibility_label(t_h, obs_h)}**. {_t_int_txt} "
                 f"({band_used} = {float(mag_star):.1f}, "
                 f"{len(baselines)} baseline{'s' if len(baselines) != 1 else ''}, "
                 f"{_dish_txt} m dishes, Δt {delta_t_ns:g} ns, ε {efficiency:g}). "
                 f"A lower bound; calibration, systematics and instrumental noise factors "
                 f"aren't included, so cross-check before relying on it."
             )
+
+            # Baseline swept over the night, with |V|^2(rho) shaded in behind it -- the same
+            # curve as the 1-D plot above, but laid out in time so you can see when the track
+            # is inside the informative first-lobe range rather than only how much of it.
+            t_idx = np.arange(len(time_labels))
+            v2_of_rho = visibility(rr, diameter_in_rad, lambda_star)
+            fig5, ax5 = plt.subplots(figsize=(9, 4))
+            ax5.imshow(np.tile(v2_of_rho.reshape(-1, 1), (1, 2)),
+                      extent=(t_idx[0], t_idx[-1], 0, r_hi), origin='lower', cmap='gray',
+                      aspect='auto', zorder=0)
+            ax5.axhline(r_null, ls="--", color="0.8", lw=1, zorder=1)
+            for (lbl, (U, V, W)), c in zip(tracks, track_colours):
+                r_i = np.hypot(U, V)
+                r_i = np.where(time_gap, np.nan, r_i)
+                ax5.plot(t_idx, r_i, 'o-', ms=3, lw=1.2, color=c, label=lbl, zorder=2)
+            ax5.set_xticks(t_idx[::xtick_step])
+            ax5.set_xticklabels(np.array(time_labels)[::xtick_step])
+            ax5.set_ylim(0, r_hi)
+            ax5.set_xlabel(f'Local time ({tz_label})')
+            ax5.set_ylabel(r"projected baseline  $\rho$  [m]")
+            ax5.set_title("Baseline swept over the night (shading: $|V|^2$)")
+            ax5.legend(fontsize=7, loc='upper right', framealpha=0.85)
+            st.pyplot(fig5)
+            plt.close(fig5)
