@@ -34,13 +34,16 @@ from telescope_coords import parse_lat_lon
 # Must precede every other Streamlit call, including the cached catalogue load below.
 st.set_page_config(layout="wide")
 
-# Cap how wide a plotted figure can render: use_container_width alone would stretch every
-# plot to fill its column, and in wide mode with only 1-2 columns that column is most of the
-# page -- much bigger than these figures need to be legible. This still shrinks a plot to fit
-# a narrower column (st.columns already clamps it there), it just stops it growing past a
-# sensible size when the column is wider than that.
-st.markdown("<style>[data-testid='stImage'] img { max-width: 620px; }</style>",
-            unsafe_allow_html=True)
+# Cap the page's own content width instead of the plots: "wide" mode's block-container has
+# no max-width at all, so on a big/ultrawide monitor a 2-column plot grid stretches its
+# columns (and every st.pyplot(..., use_container_width=True) plot in them) far past what a
+# ~600px-tall figure needs to stay legible -- oversized plots with dead space around their
+# actual content. Capping the container instead keeps every plot filling its column (no
+# empty strip beside it) while stopping that column from growing past a sensible width; on
+# a normal/narrower window this cap does nothing, since the container was already narrower.
+st.markdown(
+    "<style>[data-testid='stAppViewBlockContainer'] { max-width: 1400px; }</style>",
+    unsafe_allow_html=True)
 
 # ---------------------------------------------------------------------------------------------------------------------------------------
 # ---------------------------------------------------------------------------------------------------------------------------------------
