@@ -42,7 +42,8 @@ st.set_page_config(layout="wide")
 # empty strip beside it) while stopping that column from growing past a sensible width; on
 # a normal/narrower window this cap does nothing, since the container was already narrower.
 st.markdown(
-    "<style>[data-testid='stAppViewBlockContainer'] { max-width: 1400px; }</style>",
+    "<style>.block-container, [data-testid='stAppViewBlockContainer'] "
+    "{ max-width: 1400px; }</style>",
     unsafe_allow_html=True)
 
 # ---------------------------------------------------------------------------------------------------------------------------------------
