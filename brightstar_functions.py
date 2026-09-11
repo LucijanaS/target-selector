@@ -195,15 +195,18 @@ def find_observable_times(ra_hours, dec_deg, lat_deg, lon_deg, date_str, height_
       - the star's own altitude is at least min_altitude_deg (default 10, matching
         the convention already used in 2find_stars.py).
 
-    To avoid needing to know or guess the site's UTC offset up front, this searches
-    a 24-hour window from noon UTC of date_str to noon UTC of the following day.
-    That window comfortably contains exactly one full local night (evening through
-    morning) for any realistic observing-site longitude -- local noon is always
-    within a few hours of UTC noon except at extreme longitudes near the
-    International Date Line, which isn't a concern for any current SII site -- so
-    the sun/star altitude conditions pick out that single night's observable
-    stretch, without an earlier (wider) version of this search accidentally pulling
-    in a slice of the following night too.
+    To avoid needing to look up the site's time zone, this searches a 24-hour window
+    from mean solar noon of date_str to mean solar noon of the following day, using
+    the longitude-only approximation UT(local noon) = 12h - lon_deg/15 (exact to a
+    few minutes -- the equation of time is the only thing left out). That window
+    comfortably contains exactly one full local night (evening through morning) for
+    any site, so the sun/star altitude conditions pick out that single night's
+    observable stretch without pulling in a slice of the next one. (An earlier
+    version used UTC noon directly, which is only close to local noon near the
+    Greenwich meridian -- anywhere with several hours of UTC offset, e.g. Narrabri
+    at UTC+10 or VERITAS at UTC-7, the window missed the start of the correct night
+    and instead picked up the following night's early evening, showing up as a
+    multi-night gap and jump in the sky-track plot.)
 
     Parameters
     ----------
@@ -240,7 +243,7 @@ def find_observable_times(ra_hours, dec_deg, lat_deg, lon_deg, date_str, height_
     # instead of every caller having to remember to strip units first.
     location = EarthLocation(lat=lat_deg * u.deg, lon=lon_deg * u.deg, height=u.Quantity(height_m, u.m))
 
-    search_start = Time(date_str) + 12 * u.hour
+    search_start = Time(date_str) + (12 - lon_deg / 15.0) * u.hour
     n_steps = int(24 * 60 / time_resolution_minutes)
     search_times = search_start + np.linspace(0, 24, n_steps) * u.hour
 

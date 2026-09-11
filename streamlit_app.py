@@ -34,6 +34,14 @@ from telescope_coords import parse_lat_lon
 # Must precede every other Streamlit call, including the cached catalogue load below.
 st.set_page_config(layout="wide")
 
+# Cap how wide a plotted figure can render: use_container_width alone would stretch every
+# plot to fill its column, and in wide mode with only 1-2 columns that column is most of the
+# page -- much bigger than these figures need to be legible. This still shrinks a plot to fit
+# a narrower column (st.columns already clamps it there), it just stops it growing past a
+# sensible size when the column is wider than that.
+st.markdown("<style>[data-testid='stImage'] img { max-width: 620px; }</style>",
+            unsafe_allow_html=True)
+
 # ---------------------------------------------------------------------------------------------------------------------------------------
 # ---------------------------------------------------------------------------------------------------------------------------------------
 
@@ -807,13 +815,16 @@ else:
     #   bottom-left: baseline vs time   bottom-right: visibility map
     (grid_tl, grid_tr), (grid_bl, grid_br) = st.columns(2), st.columns(2)
 
-    fig1, ax1 = plt.subplots(figsize=(9, 4.5))
+    fig1, ax1 = plt.subplots(figsize=(6.5, 3.6))
     sc = ax1.scatter(time_labels, altitudes, c=azimuths, zorder=3)
     plt.colorbar(sc, label='Azimuth [°]', ax=ax1)
-    ax1.plot(time_labels, moon_alt, '-', color='0.6', lw=1.0, zorder=1,
+    # Break the line across a two-spell night (star dips below the altitude limit near lower
+    # culmination and comes back) so it doesn't draw a false connector across the gap.
+    moon_alt_l = np.where(time_gap, np.nan, moon_alt)
+    ax1.plot(time_labels, moon_alt_l, '-', color='0.6', lw=1.0, zorder=1,
              label=f"Moon ({moon_phase_name}, {moon_illum_pct:.0f}% illuminated)")
     n_icons = min(6, len(time_labels))
-    icon = OffsetImage(moon_icon_rgba(moon_age_deg), zoom=0.5)
+    icon = OffsetImage(moon_icon_rgba(moon_age_deg), zoom=0.35)
     for i in np.linspace(0, len(time_labels) - 1, n_icons).round().astype(int):
         ax1.add_artist(AnnotationBbox(icon, (time_labels[i], moon_alt[i]),
                                       frameon=False, zorder=4))
@@ -825,7 +836,7 @@ else:
     ax1.set_ylim(0, 90)
     ax1.grid(True)
     with grid_tl:
-        st.pyplot(fig1)
+        st.pyplot(fig1, dpi=100)
     plt.close(fig1)
 
     if not baselines:
@@ -850,7 +861,7 @@ else:
         X, Y = np.meshgrid(grid, grid)
         intensity_values = visibility(np.sqrt(X ** 2 + Y ** 2), diameter_in_rad, lambda_star)
 
-        fig2, ax2 = plt.subplots(figsize=(7, 6))
+        fig2, ax2 = plt.subplots(figsize=(5.2, 4.6))
         cax = ax2.imshow(intensity_values,
                          extent=(-size_to_plot, size_to_plot, -size_to_plot, size_to_plot),
                          origin='lower', cmap='gray', zorder=0)
@@ -877,7 +888,7 @@ else:
         with grid_br:
             st.caption("Baselines: " +
                        ", ".join(f"{lbl} ({np.linalg.norm(enu):.0f} m)" for lbl, enu in baselines))
-            st.pyplot(fig2)
+            st.pyplot(fig2, dpi=100)
         plt.close(fig2)
 
         # 1-D visibility curve with the actually-traced points marked on it. Linear y: the first
@@ -890,7 +901,7 @@ else:
             r_hi = max(rho_all.max() * 1.05, r_null * 1.25)
             rr = np.linspace(0, r_hi, 600)
 
-            fig4, axc = plt.subplots(figsize=(9, 4))
+            fig4, axc = plt.subplots(figsize=(6.5, 3.2))
             axc.axvline(r_null, ls="--", color="0.55", lw=1, zorder=1)
             axc.annotate("first null", xy=(r_null, 1.0), xytext=(-4, 0), textcoords="offset points",
                          ha="right", va="top", fontsize=8, color="0.35")
@@ -906,7 +917,7 @@ else:
             axc.set_title(f"{selected_star}, {date_str}")
             axc.grid(True, alpha=0.3)
             with grid_tr:
-                st.pyplot(fig4)
+                st.pyplot(fig4, dpi=100)
             plt.close(fig4)
 
             t_h = integration_time_s(
@@ -942,7 +953,7 @@ else:
             # is inside the informative first-lobe range rather than only how much of it.
             t_idx = np.arange(len(time_labels))
             v2_of_rho = visibility(rr, diameter_in_rad, lambda_star)
-            fig5, ax5 = plt.subplots(figsize=(9, 4))
+            fig5, ax5 = plt.subplots(figsize=(6.5, 3.2))
             ax5.imshow(np.tile(v2_of_rho.reshape(-1, 1), (1, 2)),
                       extent=(t_idx[0], t_idx[-1], 0, r_hi), origin='lower', cmap='gray',
                       aspect='auto', zorder=0)
@@ -959,5 +970,5 @@ else:
             ax5.set_title("Baseline swept over the night (shading: $|V|^2$)")
             ax5.legend(fontsize=7, loc='upper right', framealpha=0.85)
             with grid_bl:
-                st.pyplot(fig5)
+                st.pyplot(fig5, dpi=100)
             plt.close(fig5)
