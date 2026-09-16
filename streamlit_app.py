@@ -890,8 +890,6 @@ else:
         ax2.legend(fontsize=7, loc='upper right', framealpha=0.85)
         plt.colorbar(cax, label="Squared visibility", ax=ax2)
         with grid_br:
-            st.caption("Baselines: " +
-                       ", ".join(f"{lbl} ({np.linalg.norm(enu):.0f} m)" for lbl, enu in baselines))
             st.pyplot(fig2, dpi=100)
         plt.close(fig2)
 
