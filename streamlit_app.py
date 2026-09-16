@@ -827,11 +827,20 @@ else:
     moon_alt_l = np.where(time_gap, np.nan, moon_alt)
     ax1.plot(time_labels, moon_alt_l, '-', color='0.6', lw=1.0, zorder=1,
              label=f"Moon ({moon_phase_name}, {moon_illum_pct:.0f}% illuminated)")
-    n_icons = min(6, len(time_labels))
-    icon = OffsetImage(moon_icon_rgba(moon_age_deg), zoom=0.35)
-    for i in np.linspace(0, len(time_labels) - 1, n_icons).round().astype(int):
-        ax1.add_artist(AnnotationBbox(icon, (time_labels[i], moon_alt[i]),
-                                      frameon=False, zorder=4))
+    # Only anchor icons where the Moon is actually above the horizon: an AnnotationBbox
+    # anchored below it (moon_alt < 0, off the bottom of the axes) still counts towards
+    # Streamlit's default bbox_inches="tight" crop regardless of axes clipping, which silently
+    # inflated this one figure's saved canvas far past its visible content -- since every
+    # figure in this grid shares a column with another, that made this plot alone much taller
+    # than its row partner and left a dead gap below it.
+    above_horizon = np.flatnonzero(moon_alt > 0)
+    if above_horizon.size:
+        n_icons = min(6, above_horizon.size)
+        icon = OffsetImage(moon_icon_rgba(moon_age_deg), zoom=0.35)
+        for frac in np.linspace(0.06, 0.94, n_icons):
+            i = above_horizon[int(round(frac * (above_horizon.size - 1)))]
+            ab = AnnotationBbox(icon, (time_labels[i], moon_alt[i]), frameon=False, zorder=4)
+            ax1.add_artist(ab)
     ax1.legend(fontsize=7, loc='upper right')
     ax1.set_xticks(time_labels[::xtick_step])
     ax1.set_title("Celestial path of " + str(BayerF))
